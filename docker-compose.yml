@@ -1,0 +1,177 @@
+version: "3.9"
+
+services:
+
+  # =========================
+  # Spark Standalone Cluster
+  # =========================
+
+  spark-master:
+    image: discogs-pyspark:3.5.2
+    container_name: spark-master
+    hostname: spark-master
+    command: >
+      spark-class
+      org.apache.spark.deploy.master.Master
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    networks:
+      - discogs-net
+
+  spark-worker:
+    image: discogs-pyspark:3.5.2
+    depends_on:
+      - spark-master
+    command: >
+      spark-class
+      org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+    environment:
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    networks:
+      - discogs-net
+
+  # =========================
+  # Airflow
+  # =========================
+
+
+airflow:
+  build: ./docker/airflow
+  container_name: airflow
+  depends_on:
+    - spark-master
+    - postgres
+  command: airflow standalone
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  ports:
+    - "8081:8080"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./app:/app
+    - ./data:/data
+  networks:
+    - discogs-net
+
+  # =========================
+  # PostgreSQL (Serving Layer)
+  # =========================
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: discogs
+      POSTGRES_PASSWORD: discogs
+      POSTGRES_DB: discogs_dw
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - discogs-net
+
+  # =========================
+  # Neo4j (Graph Analytics)
+  # =========================
+
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j
+    environment:
+      NEO4J_AUTH: neo4j/discogs
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/data
+    networks:
+      - discogs-net
+
+  # =========================
+  # dbt (Postgres Transformations)
+  # =========================
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
+    container_name: dbt
+    depends_on:
+      - postgres
+    volumes:
+      - ./dbt:/usr/app
+    working_dir: /usr/app
+    command: dbt run
+    networks:
+      - discogs-net
+
+  # =========================
+  # Dash (User-Facing App)
+  # =========================
+
+  dash:
+    build: ./dash
+    container_name: dash
+    depends_on:
+      - postgres
+    ports:
+      - "8050:8050"
+    networks:
+      - discogs-net
+
+  # =========================
+  # Prometheus
+  # =========================
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - discogs-net
+
+  # =========================
+  # Grafana
+  # =========================
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafanadata:/var/lib/grafana
+    networks:
+      - discogs-net
+
+# =========================
+# Volumes
+# =========================
+
+volumes:
+  pgdata:
+  neo4jdata:
+  grafanadata:
+
+# =========================
+# Network
+# =========================
+
+networks:
+  discogs-net:
+    driver: bridge
