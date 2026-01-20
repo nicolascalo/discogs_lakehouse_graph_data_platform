@@ -1,8 +1,8 @@
 # Data folders
 data/
-data_test/bronze
-data_test/silver
-data_test/gold
+data_tests/bronze
+data_tests/silver
+data_tests/gold
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

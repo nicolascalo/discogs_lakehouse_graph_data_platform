@@ -1,13 +1,14 @@
 import os
 import math
 import requests
-import threading
 import logging
 import datetime
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 import re
 import hashlib
+import json
+import dotenv
 
 # ----------------------------
 # Logging setup
@@ -22,25 +23,27 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # Config
 # ----------------------------
-RAW_DIR = "./data/raw/"
+
+dotenv.load_dotenv()
+
+DATA_RETRIEVAL_CONFIG_PATH = os.getenv("DATA_RETRIEVAL_CONFIG_PATH")
+
+try:
+    with open(DATA_RETRIEVAL_CONFIG_PATH, "r") as json_file:
+        CONFIG = json.loads(json_file.read())
+except Exception as e:
+    raise(e)
+ 
+
+
+
+
+RAW_DIR = os.getenv("RAW_DIR")
+DISCOGS_DUMP_URL_ROOT = os.getenv("DISCOGS_DUMP_URL_ROOT")
+
+
 os.makedirs(RAW_DIR, exist_ok=True)
 
-URL_ROOT = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data"
-DISC_PREFIX = "discogs_"
-DISC_SUFFIX_LIST = [
-    "_CHECKSUM.txt",
-    "_masters.xml.gz",
-    "_labels.xml.gz",
-    "_artists.xml.gz",
-    "_releases.xml.gz"
-
-]
-YEAR_LIMIT_PAST = 2007
-PARALLEL_RANGES = 4          # Number of threads per file
-LOG_PROGRESS_EVERY_MB = 10   # Log every 10 MB
-CHUNK_SIZE = 1024 * 1024     # 1 MB
-RETRIES = 5                  # Retry per range on timeout
-TIMEOUT = (10, 300)          # (connect_timeout, read_timeout)
 
 # ----------------------------
 # Utilities
@@ -58,13 +61,13 @@ def retrieve_downloaded_dumps(dir: str) -> set[str]:
 # ----------------------------
 # Latest dump detection
 # ----------------------------
-def get_latest_dump_date(url_root: str) -> str:
+def get_latest_dump_date(url: str) -> str:
     logger.info("Searching for latest Discogs dump...")
     test_date = datetime.datetime.today().date()
-    while test_date.year > YEAR_LIMIT_PAST:
+    while test_date.year > CONFIG["YEAR_LIMIT_PAST"]:
         day = str(test_date.day).zfill(2)
         month = str(test_date.month).zfill(2)
-        url_date = f"{url_root}/{test_date.year}/{DISC_PREFIX}{test_date.year}{month}{day}"
+        url_date = f"{url}/{test_date.year}/{CONFIG["DISC_PREFIX"]}{test_date.year}{month}{day}"
         checksum_url = url_date + "_CHECKSUM.txt"
 
         try:
@@ -78,7 +81,7 @@ def get_latest_dump_date(url_root: str) -> str:
 
         test_date -= datetime.timedelta(days=1)
 
-    raise RuntimeError(f"No valid Discogs dump found after {YEAR_LIMIT_PAST}")
+    raise RuntimeError(f"No valid Discogs dump found after {CONFIG["YEAR_LIMIT_PAST"]}")
 
 # ----------------------------
 # SHA256 validation
@@ -122,7 +125,7 @@ def validate_downloads(dir: str, date: str):
 # ----------------------------
 # Parallel range download with resume and retries
 # ----------------------------
-def download_large_file_parallel(url: str, output_dir: str, num_threads: int = PARALLEL_RANGES):
+def download_large_file_parallel(url: str, output_dir: str, num_threads: int = CONFIG["PARALLEL_RANGES"]):
     filename = os.path.basename(url)
     local_path = os.path.join(output_dir, filename)
     temp_dir = os.path.join(output_dir, filename + "_parts")
@@ -151,28 +154,28 @@ def download_large_file_parallel(url: str, output_dir: str, num_threads: int = P
 
         retries = 0
         mb_counter = 0
-        while retries <= RETRIES:
+        while retries <= CONFIG["RETRIES"]:
             try:
-                with requests.get(url, headers=headers, stream=True, timeout=TIMEOUT) as r:
+                with requests.get(url, headers=headers, stream=True, timeout=CONFIG["TIMEOUT"]) as r:
                     r.raise_for_status()
                     with open(part_path, mode) as f:
-                        for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
+                        for chunk in r.iter_content(chunk_size=CONFIG["CHUNK_SIZE"]):
                             if chunk:
                                 f.write(chunk)
                                 mb_counter += len(chunk)
-                                if mb_counter >= LOG_PROGRESS_EVERY_MB*1024*1024:
+                                if mb_counter >= CONFIG["LOG_PROGRESS_EVERY_MB"]*1024*1024:
                                     total_downloaded = sum(os.path.getsize(os.path.join(temp_dir, f"part_{i}")) for i in range(num_threads))
                                     logger.info("Downloading %s: %.2f / %.2f MB", filename, total_downloaded/1e6, total_size/1e6)
                                     mb_counter = 0
                 break  # success
             except requests.exceptions.ReadTimeout:
                 retries += 1
-                logger.warning("Timeout in part %d, retry %d/%d", idx, retries, RETRIES)
+                logger.warning("Timeout in part %d, retry %d/%d", idx, retries, CONFIG["RETRIES"])
             except Exception as e:
                 logger.error("Error in part %d: %s", idx, e)
                 raise
         else:
-            raise RuntimeError(f"Failed to download part {idx} after {RETRIES} retries")
+            raise RuntimeError(f"Failed to download part {idx} after {CONFIG["RETRIES"]} retries")
 
     # Download all ranges in parallel
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -192,14 +195,14 @@ def download_large_file_parallel(url: str, output_dir: str, num_threads: int = P
 
 # ----------------------------
 # Main execution
-# ----------------------------
+# ----------------------------requests
 if __name__ == "__main__":
     already_downloaded = retrieve_downloaded_dumps(RAW_DIR)
-    latest_url_root = get_latest_dump_date(URL_ROOT)
-    date_latest_dump = re.sub(".*_", "", latest_url_root)
+    latest_discogs_dump_url_root = get_latest_dump_date(DISCOGS_DUMP_URL_ROOT)
+    date_latest_dump = re.sub(".*_", "", latest_discogs_dump_url_root)
 
-    for suffix in DISC_SUFFIX_LIST:
-        full_url = f"{latest_url_root}{suffix}"
+    for suffix in CONFIG["DISC_SUFFIX_LIST"]:
+        full_url = f"{latest_discogs_dump_url_root}{suffix}"
         download_large_file_parallel(full_url, RAW_DIR)
 
     validate_downloads(RAW_DIR, date_latest_dump)
