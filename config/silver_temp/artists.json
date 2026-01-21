@@ -1,0 +1,80 @@
+[
+  {
+    "table_layer": "bronze",
+    "table_input": "artists",
+    "table_output": "artists",
+    "fields": [
+      {
+        "source": "dump",
+        "alias": "dump",
+        "required": true
+      },
+      {
+        "source": "id",
+        "alias": "artist_id",
+        "required": true
+      },
+      {
+        "source": "name",
+        "alias": "artist_name",
+        "required": true
+      },
+      {
+        "source": "realname",
+        "alias": "artist_realname",
+        "required": false
+      }
+    ]
+  },
+  {
+    "table_layer": "bronze",
+    "table_input": "artists",
+    "table_output": "artists_groups",
+    "explode": "groups.name",
+    "fields": [
+      {
+        "source": "dump",
+        "alias": "dump",
+        "required": true
+      },
+      {
+        "source": "id",
+        "alias": "artist_id",
+        "required": true
+      },
+      {
+        "source": "element.@id",
+        "alias": "group_id",
+        "required": true
+      }
+    ]
+  },
+  {
+    "table_layer": "bronze",
+    "table_input": "artists",
+    "table_output": "groups",
+    "explode": "groups.name",
+    "fields": [
+      {
+        "source": "dump",
+        "alias": "dump",
+        "required": true
+      },
+      {
+        "source": "element.@id",
+        "alias": "group_id",
+        "required": true
+      },
+      {
+        "source": "element._text",
+        "alias": "group_name",
+        "required": true
+      },
+      {
+        "value": "Release artist",
+        "alias": "role",
+        "required": true
+      }
+    ]
+  }
+]

@@ -23,7 +23,9 @@ services:
       - ./jobs:/jobs    # ingestion scripts
       - ./logs:/logs    # logs
       - ./data:/data        # Delta tables
-      - ./data_tests:/data_tests        # Delta tables
+      - ./data_tests:/data_tests        # Delta test tables
+      - ./config:/config        # Config files
+      
     networks:
       - discogs-net
     env_file: ".env"
@@ -47,7 +49,8 @@ services:
       - ./jobs:/jobs
       - ./logs:/logs    # logs
       - ./data:/data        # Delta tables
-      - ./data_tests:/data_tests        # Delta tables
+      - ./data_tests:/data_tests        # Delta test tables
+      - ./config:/config        # Config files
     networks:
       - discogs-net
     env_file: ".env"

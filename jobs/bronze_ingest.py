@@ -1,6 +1,5 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit
-from pyspark.sql.utils import AnalysisException
 import os
 import re
 import gzip
@@ -12,9 +11,8 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from pyspark.sql import functions as F
-from pyspark.sql.types import ArrayType, StructType
 from delta.tables import DeltaTable
+from pyspark.sql import functions as F
 
 ## Logging setup
 
@@ -258,7 +256,7 @@ for dump_date in n_latest_dumps_dates:
             with open(schema_path, "w") as f:
                 f.write(xml_schema_tree)
 
-            xml_schema_json = xml_schema.json()
+            xml_schema_json = xml_schema()
 
             schema_path = os.path.join(
                 BRONZE_DATA_DIR,
