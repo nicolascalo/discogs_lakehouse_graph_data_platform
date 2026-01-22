@@ -1,15 +1,10 @@
 [
     {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "artists",
     "table_output": "artists",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "id",
         "alias": "artist_id",
@@ -28,17 +23,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "artists",
     "table_output": "artists_groups",
     "explode": "groups.name",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "id",
         "alias": "artist_id",
@@ -52,17 +42,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "artists",
     "table_output": "groups",
     "explode": "groups.name",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "element.@id",
         "alias": "group_id",
@@ -81,16 +66,11 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -114,17 +94,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases_artists_main",
     "explode": "artists.artist",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -153,8 +128,8 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases_artists_extra",
     "explode": "extraartists.artist",
@@ -164,11 +139,6 @@
       "alias": "role_element"
     },
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -198,17 +168,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases_genres",
     "explode": "genres.genre",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -222,17 +187,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases_styles",
     "explode": "styles.style",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -246,17 +206,12 @@
     ]
   },
   {
-    "layer_input": "bronze",
-    "layer_output": "silver",
+    "layer_input": "silver/basetables",
+    "layer_output": "silver/subtables",
     "table_input": "releases",
     "table_output": "releases_tracklist",
     "explode": "tracklist.track",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -280,17 +235,12 @@
     ]
   },
   {
-    "layer_input": "silver",
-    "layer_output": "silver",
+    "layer_input": "silver/subtables",
+    "layer_output": "silver/subtables",
     "table_input": "releases_tracklist",
     "table_output": "releases_tracklist_extraartists",
     "explode": "release_track_extraartists.artist",
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "release_id",
         "alias": "release_id",
@@ -324,22 +274,17 @@
     ]
   },
   {
-    "layer_input": "silver",
-    "layer_output": "silver",
+    "layer_input": "silver/subtables",
+    "layer_output": "silver/subtables",
     "table_input": "releases_tracklist_extraartists",
     "table_output": "releases_tracklist_extraartists_roles",
 
 
     "post_split_explode": {
     "source": "artist_role",
-    "separator": ","
+    "separator": ", "
   },
     "fields": [
-      {
-        "source": "dump",
-        "alias": "dump",
-        "required": true
-      },
       {
         "source": "release_id",
         "alias": "release_id",
