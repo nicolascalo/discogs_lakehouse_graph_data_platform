@@ -1,16 +1,11 @@
 [
-  {
+    {
     "layer_input": "bronze",
     "layer_output": "silver/basetables",
     "table_input": "artists",
     "table_output": "artists",
     "primary_key": "id",
-    "fields": [
-      {
-        "source": "_row_hash",
-        "alias": "_row_hash",
-        "required": true
-      },
+    "fields": [{"source":"_og_row_hash","alias":"_og_row_hash","required":true},
       {
         "source": "id",
         "alias": "id",
@@ -39,12 +34,7 @@
     "table_input": "releases",
     "table_output": "releases",
     "primary_key": "@id",
-    "fields": [
-      {
-        "source": "_row_hash",
-        "alias": "_row_hash",
-        "required": true
-      },
+    "fields": [{"source":"_og_row_hash","alias":"_og_row_hash","required":true},
       {
         "source": "@id",
         "alias": "@id",

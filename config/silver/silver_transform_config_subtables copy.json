@@ -1,10 +1,15 @@
 [
-    {
+  {
     "layer_input": "silver/basetables",
     "layer_output": "silver/subtables",
     "table_input": "artists",
     "table_output": "artists",
     "fields": [
+      {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
       {
         "source": "id",
         "alias": "artist_id",
@@ -30,6 +35,11 @@
     "explode": "groups.name",
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "id",
         "alias": "artist_id",
         "required": true
@@ -49,6 +59,11 @@
     "explode": "groups.name",
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "element.@id",
         "alias": "group_id",
         "required": true
@@ -56,11 +71,6 @@
       {
         "source": "element._text",
         "alias": "group_name",
-        "required": true
-      },
-      {
-        "value": "Release artist",
-        "alias": "role",
         "required": true
       }
     ]
@@ -71,6 +81,11 @@
     "table_input": "releases",
     "table_output": "releases",
     "fields": [
+      {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -100,6 +115,11 @@
     "table_output": "releases_artists_main",
     "explode": "artists.artist",
     "fields": [
+      {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -140,6 +160,11 @@
     },
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "@id",
         "alias": "release_id",
         "required": true
@@ -175,6 +200,11 @@
     "explode": "genres.genre",
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "@id",
         "alias": "release_id",
         "required": true
@@ -194,6 +224,11 @@
     "explode": "styles.style",
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "@id",
         "alias": "release_id",
         "required": true
@@ -212,6 +247,11 @@
     "table_output": "releases_tracklist",
     "explode": "tracklist.track",
     "fields": [
+      {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
       {
         "source": "@id",
         "alias": "release_id",
@@ -242,6 +282,11 @@
     "explode": "release_track_extraartists.artist",
     "fields": [
       {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
+      {
         "source": "release_id",
         "alias": "release_id",
         "required": true
@@ -268,7 +313,7 @@
       },
       {
         "source": "element.role",
-        "alias": "artist_role",
+        "alias": "artist_roles",
         "required": true
       }
     ]
@@ -278,13 +323,16 @@
     "layer_output": "silver/subtables",
     "table_input": "releases_tracklist_extraartists",
     "table_output": "releases_tracklist_extraartists_roles",
-
-
     "post_split_explode": {
-    "source": "artist_role",
-    "separator": ", "
-  },
+      "source": "artist_roles",
+      "separator": ", "
+    },
     "fields": [
+      {
+        "source": "_og_row_hash",
+        "alias": "_og_row_hash",
+        "required": true
+      },
       {
         "source": "release_id",
         "alias": "release_id",
