@@ -1,0 +1,35 @@
+[
+    {
+        "layer_input": "bronze",
+        "table_input": "artists",
+        "layer_output": "silver",
+        "table_output": "artists",
+        "primary_key": "id",
+        "keep": [
+            "data_quality",
+            "groups",
+            "id",
+            "members",
+            "name",
+            "realname"
+        ]
+    },
+    {
+        "layer_input": "bronze",
+        "table_input": "releases",
+        "layer_output": "silver",
+        "table_output": "releases",
+        "primary_key": "@id",
+        "keep": [
+            "@id",
+            "@status",
+            "artists",
+            "extraartists",
+            "genres",
+            "released",
+            "styles",
+            "title",
+            "tracklist"
+        ]
+    }
+]

@@ -5,19 +5,8 @@ import pandas as pd
 from pathlib import Path
 from delta.tables import DeltaTable
 from pyspark.sql import SparkSession, functions as F
+import pandas as pd
 
-from ingest_helpers.spark_processing_helpers import (
-    select_fields_with_alias,
-    wrap_all_structs,
-    apply_explode,
-    apply_post_split_explode,
-    enforce_required,
-    with_row_hash,
-    spark_upsert_based_on_hashes_with_stats,
-    spark_create_df_with_stats,
-    spark_replace_by_hash,
-    extract_required_roots,
-)
 from ingest_helpers.folder_helpers import get_folder_list, get_dump_dates
 from ingest_helpers.config_helpers import load_config_from_json
 from ingest_helpers.info_output_helpers import (
@@ -28,6 +17,13 @@ from ingest_helpers.info_output_helpers import (
     output_schema_txt,
     output_schema_csv,
 )
+
+# from ingest_helpers.spark_processing_helpers2 import build_tree, normalize_tree, sort_tree, select_tree,  explode_nested, split_nested
+
+# from ingest_helpers.spark_processing_helpers2_test import apply_enrich
+
+from ingest_helpers.spark_processing_helpers3 import *
+
 
 # -----------------------------
 # Logging setup
@@ -41,10 +37,7 @@ if not logger.handlers:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(LOG_FILE)
-        ]
+        handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE)],
     )
 
 logger.info(f"Logging to {LOG_FILE}")
@@ -53,18 +46,10 @@ logger.info(f"Logging to {LOG_FILE}")
 # Environment / config
 # -----------------------------
 DATA_DIR = os.getenv("DATA_DIR")
-BRONZE_DATA_DIR = os.getenv("BRONZE_DATA_DIR")
-SILVER_DATA_DIR = os.getenv("SILVER_DATA_DIR")
-SILVER_GENERAL_CONFIG_PATH = os.getenv("SILVER_GENERAL_CONFIG_PATH")
-SILVER_TRANSFORM_BASE_CONFIG_PATH = os.getenv("SILVER_TRANSFORM_BASE_CONFIG_PATH")
-SILVER_TRANSFORM_SUB_CONFIG_PATH = os.getenv("SILVER_TRANSFORM_SUB_CONFIG_PATH")
+BRONZE_DATA_DIR = os.path.join(DATA_DIR, "bronze")
+SILVER_INGEST_CONFIG_PATH = os.getenv("SILVER_INGEST_CONFIG_PATH")
 
-if not BRONZE_DATA_DIR or not SILVER_DATA_DIR or not SILVER_GENERAL_CONFIG_PATH:
-    raise ValueError("BRONZE_DATA_DIR, SILVER_DATA_DIR, SILVER_GENERAL_CONFIG_PATH must be set")
-
-CONFIG = load_config_from_json(SILVER_GENERAL_CONFIG_PATH)
-
-logger.info(f"{BRONZE_DATA_DIR = }, {SILVER_DATA_DIR = }")
+OUTPUT_DEBUG_FILES = True
 
 # -----------------------------
 # Spark session
@@ -79,217 +64,202 @@ spark = (
     .getOrCreate()
 )
 spark.sparkContext.setLogLevel("ERROR")
+spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+
 
 # -----------------------------
 # Listing folders & dumps
 # -----------------------------
 bronze_folders = get_folder_list(BRONZE_DATA_DIR)
-silver_folders = get_folder_list(SILVER_DATA_DIR)
 dump_dates = get_dump_dates(bronze_folders)
-logger.info(f"{dump_dates = }")
 
-n = CONFIG["NB_DUMPS_TO_PROCESS"]
+print("")
+logger.info(f"{dump_dates = }")
+print("")
+n = int(os.getenv("NB_DUMPS_TO_PROCESS", 1))
 n_latest_dumps_dates = sorted(dump_dates[-n - 1 :])
+
+print("")
+
 logger.info(f"Processing {n} latest dumps: {n_latest_dumps_dates}")
+print("")
+
 
 # Load configs
-table_configs_base = load_config_from_json(SILVER_TRANSFORM_BASE_CONFIG_PATH)
-table_configs_sub = load_config_from_json(SILVER_TRANSFORM_SUB_CONFIG_PATH)
+table_configs = load_config_from_json(SILVER_INGEST_CONFIG_PATH)
+
 
 # -----------------------------
 # Start ingestion
 # -----------------------------
-path_merge_log = os.path.join(DATA_DIR, "silver", "silver_merge_log.csv")
 previous_input_path = None
 
 for dump_date in n_latest_dumps_dates:
-    logger.info(f"Processing dump date {dump_date}")
-
-    # -----------------------------
-    # Base tables
-    # -----------------------------
-    for cfg in table_configs_base:
+    for cfg in table_configs:
+        logger.info(f"")
+        logger.info(f"")
+        logger.info(
+            f"================================================================================================="
+        )
+        logger.info(f"Processing dump date {dump_date} with config {cfg}")
+        logger.info(
+            f"================================================================================================="
+        )
+        print("")
 
         time_start = datetime.datetime.now()
 
-        input_table = cfg["table_input"]
-        output_table = cfg["table_output"]
-        primary_key = cfg["primary_key"]
-        fields = cfg["fields"]
         layer_input = cfg["layer_input"]
         layer_output = cfg["layer_output"]
+        table_input = cfg["table_input"]
+        table_output = cfg["table_output"]
 
-        output_path = os.path.join(DATA_DIR, layer_output, output_table)
-        input_path = os.path.join(DATA_DIR, layer_input, input_table)
+        output_path = os.path.join(DATA_DIR, layer_output, table_output)
+        input_path = os.path.join(DATA_DIR, layer_input, table_input)
 
-        last_merge_log = get_or_create_last_log(path_merge_log)
-        last_processed_dump = get_last_dump_date(last_merge_log, output_path)
+        # if int(dump_date) <= last_processed_dump:
+        #    logger.info(f"{dump_date} <= {last_processed_dump}: skipping")
+        #    continue
 
-        if int(dump_date) <= last_processed_dump:
-            logger.info(f"{dump_date} <= {last_processed_dump}: skipping")
-            continue
+        delta_table_path = os.path.join(
+            DATA_DIR, layer_input, table_input, f"dump={dump_date}"
+        )
+        print("")
+        logger.info(f"Loading {layer_input} table: {delta_table_path}")
+        logger.info(f"")
+        
+        df = spark.read.format("delta").load(delta_table_path)
 
-        delta_table_path = os.path.join(BRONZE_DATA_DIR, input_table, f"dump={dump_date}")
-        logger.info(f"Loading bronze table: {delta_table_path}")
-        df_bronze = spark.read.format("delta").load(delta_table_path)
+        # Select all columns from DataFrame
+        logger.info(f'Keeping columns {cfg["keep"]}')
+        
+        df_selected = df.select(*cfg["keep"])
 
-        # Only hash relevant fields
-        cols_to_hash = [f["source"] for f in fields if f["source"] != "_og_row_hash"]
-        df_bronze = with_row_hash(df_bronze, cols_to_hash)
+        # Compute root hash
 
-        df_bronze = wrap_all_structs(df_bronze)
-        df_bronze = select_fields_with_alias(df_bronze, fields)
+        logger.info(f'Hashing root column')
 
-        # Metadata
-        metadata_op_dict = {
-            "dump_date": dump_date,
-            "input_path": input_path,
-            "output_path": output_path
-        }
-
-        # Upsert vs create
-        if DeltaTable.isDeltaTable(spark, output_path):
-            metadata_op_dict["op"] = "merge"
-            logger.info(f"Updating Delta table {output_path}")
-            stats = spark_upsert_based_on_hashes_with_stats(
-                spark, df_bronze, primary_key, output_path, metadata_op_dict
-            )
-        else:
-            metadata_op_dict["op"] = "init"
-            logger.info(f"Creating new Delta table {output_path}")
-            stats = spark_create_df_with_stats(spark, df_bronze, output_path, metadata_op_dict)
-
-        # -----------------------------
-        # Log metrics
-        # -----------------------------
-        duration_min = round((datetime.datetime.now() - time_start).total_seconds() / 60, 2)  # Optional
-        silver_merge_log = pd.DataFrame({
-            "timestamp": [datetime.datetime.now().isoformat()],
-            "input_path": [input_path],
-            "output_path": [output_path],
-            "dump": [dump_date],
-            "previous_total": [stats["count_before"]],
-            "updated": [stats["updated"]],
-            "not_modified": [stats["not_modified"]],
-            "inserted": [stats["inserted"]],
-            "total": [stats["total"]],
-            "duration_min": [duration_min],
-        })
-        silver_merge_log = pd.concat([last_merge_log, silver_merge_log], ignore_index=True)
-        silver_merge_log.sort_values(by=["input_path", "output_path", "dump"]).to_csv(path_merge_log, index=False)
-
-        # -----------------------------
-        # Output schema + JSON
-        # -----------------------------
-        output_schema_json(df_bronze, output_path)
-        output_schema_txt(df_bronze, output_path)
-        output_schema_csv(df_bronze, output_path)
-        output_single_json(df_bronze, output_path)
-        output_single_json(df_bronze, f"{output_path}_{dump_date}")
-
-    # -----------------------------
-    # Subtables
-    # -----------------------------
-    for cfg in table_configs_sub:
-        time_start = datetime.datetime.now()
-        input_table = cfg["table_input"]
-        output_table = cfg["table_output"]
-        fields = cfg["fields"]
-        layer_input = cfg["layer_input"]
-        layer_output = cfg["layer_output"]
-
-
-
-        output_path = os.path.join(DATA_DIR, layer_output, output_table)
-        input_path = os.path.join(DATA_DIR, layer_input, input_table)
-
-        print(f"{input_path = }")
-        print(f"{output_path = }")
-
-
-        last_merge_log = get_or_create_last_log(path_merge_log)
-        last_processed_dump = get_last_dump_date(last_merge_log, output_path)
-
-        if int(dump_date) <= last_processed_dump:
-            continue
-
-        if previous_input_path != input_path:
-            logger.info(f"Loading new subtables from {input_path}")
-            previous_input_path = input_path
-
-
-
-        df_silver = spark.read.format("delta").load(input_path)
-
-        required_roots = extract_required_roots(
-            fields,
-            cfg.get("explode"),
-            cfg.get("post_split_explode")
+        df_hashed = df_selected.withColumn(
+            "root_hash", F.sha2(F.to_json(F.struct(*df_selected.columns)), 256)
         )
 
-        df_silver = df_silver.select(*required_roots)
 
 
 
-        cols_to_hash_alias = [f["alias"] for f in fields if f["alias"] != "_og_row_hash"]
-        cols_to_hash_source = [f["source"] for f in fields if f["alias"] != "_og_row_hash"]
-        cols_to_hash = cols_to_hash_alias + cols_to_hash_source
+        if OUTPUT_DEBUG_FILES:
+            output_single_json(df_hashed, f"{output_path}_{dump_date}_root_hash")
 
-        # map aliases back to source columns
-
+        logger.info(f'Converting all to string')
 
 
+        def cast_non_key_columns_to_string(df, primary_key, hash_col):
+            cols = []
 
-        df_silver = with_row_hash(df_silver, cols_to_hash)
+            for c in df.columns:
+                if c in [primary_key, hash_col]:
+                    cols.append(F.col(c))  # keep original type
+                else:
+                    cols.append(F.col(c).cast("string").alias(c))
 
-        # 5️⃣ Explode/post_split AFTER hashing
-        if "explode" in cfg:
-            df_silver = apply_explode(df_silver, cfg["explode"])
+            return df.select(*cols)
 
-
-        if "post_split_explode" in cfg:
-            df_silver = apply_post_split_explode(df_silver, cfg["post_split_explode"])
-
-        df_silver = select_fields_with_alias(df_silver, fields)
-
-        df_silver = enforce_required(df_silver, fields)
+        df_hashed = cast_non_key_columns_to_string(
+            df_hashed, primary_key=cfg["primary_key"], hash_col="root_hash"
+        )
 
 
-        metadata_op_dict = {
-            "dump_date": dump_date,
-            "input_path": input_path,
-            "output_path": output_path,
-            "op": "init" if not DeltaTable.isDeltaTable(spark, output_path) else "merge"
-        }
+        logger.info(f'Writing Delta Table')
 
-        if DeltaTable.isDeltaTable(spark, output_path):
-            stats = spark_replace_by_hash(
-                spark, df_silver, fields[0]["alias"], output_path, metadata_op_dict
+        if not DeltaTable.isDeltaTable(spark, output_path):
+            df_hashed.write.format("delta").mode("overwrite").save(output_path)
+
+            from pyspark.sql import Row
+
+            history_df = spark.createDataFrame(
+                [
+                    Row(
+                        version=0,
+                        timestamp=str(
+                            datetime.datetime.now()
+                        ),  # cast to string explicitly
+                        operation="WRITE",
+                        operationMetrics={
+                            "numTargetRowsInserted": df_hashed.count(),
+                            "numTargetRowsUpdated": 0,
+                            "numTargetRowsDeleted": 0,
+                            "numTargetRowsNotMatchedBySourceDeleted": 0,
+                        },
+                    )
+                ]
             )
+
         else:
-            stats = spark_create_df_with_stats(spark, df_silver, output_path, metadata_op_dict)
+            target = DeltaTable.forPath(spark, output_path)
 
-        # Output
-        output_schema_json(df_silver, output_path)
-        output_schema_txt(df_silver, output_path)
-        output_schema_csv(df_silver, output_path)
-        output_single_json(df_silver, output_path)
-        output_single_json(df_silver, f"{output_path}_{dump_date}")
+            (
+                target.alias("t")
+                .merge(
+                    df_hashed.alias("s"),
+                    f"t.`{cfg['primary_key']}` = s.`{cfg['primary_key']}`",
+                )
+                .whenMatchedUpdateAll(condition="t.root_hash <> s.root_hash")
+                .whenNotMatchedInsertAll()
+                .whenNotMatchedBySourceDelete()
+                .execute()
+            )
 
-        duration_min = round((datetime.datetime.now() - time_start).total_seconds() / 60, 2)  # Optional
-        continue
-        # Log metrics
-        silver_merge_log = pd.DataFrame({
-            "timestamp": [datetime.datetime.now().isoformat()],
-            "input_path": [input_path],
-            "output_path": [output_path],
-            "dump": [dump_date],
-            "previous_total": [stats["count_before"]],
-            "updated": [stats["updated"]],
-            "not_modified": [stats["not_modified"]],
-            "inserted": [stats["inserted"]],
-            "total": [stats["total"]],
-            "duration_min": [duration_min],
-        })
-        silver_merge_log = pd.concat([last_merge_log, silver_merge_log], ignore_index=True)
-        silver_merge_log.sort_values(by=["input_path", "output_path", "dump"]).to_csv(path_merge_log, index=False)
+
+
+
+        csv_path = f"{LOG_DIR}/discogs_{layer_output}_{table_output}_delta_history.csv"
+
+        logger.info(f"Outputing metrics: {csv_path}")
+
+        # 1️⃣ Read Delta history
+        history = spark.sql(f"DESCRIBE HISTORY delta.`{output_path}`")
+
+        # 2️⃣ Add metadata columns
+        history = (
+            history.withColumn("dump", F.lit(dump_date))
+            .withColumn("layer_output", F.lit(layer_output))
+            .withColumn("table_output", F.lit(table_output))
+            .withColumn("layer_input", F.lit(layer_input))
+            .withColumn("table_input", F.lit(table_input))
+            .withColumn("cols_kept", F.lit(cfg["keep"]))
+        )
+
+        # 3️⃣ Flatten operationMetrics dynamically
+        metric_keys = (
+            history.select(F.explode("operationMetrics").alias("metric", "value"))
+            .select("metric")
+            .distinct()
+            .rdd.flatMap(lambda r: r)
+            .collect()
+        )
+
+        select_cols = [
+            "version",
+            "timestamp",
+            "operation",
+            "dump",
+            "layer_output",
+            "table_output",
+            "layer_input",
+            "table_input",
+            "cols_kept",
+        ] + [F.col("operationMetrics")[k].alias(k) for k in metric_keys]
+
+        history_flat = history.select(*select_cols)
+
+        # 4️⃣ Convert to Pandas
+        pdf = history_flat.toPandas()
+
+        # 5️⃣ Append to existing CSV if exists
+        csv_file_path = csv_path
+        if os.path.exists(csv_file_path):
+            pdf_existing = pd.read_csv(csv_file_path)
+            pdf = pd.concat([pdf_existing, pdf], ignore_index=True)
+
+        # 6️⃣ Export to single CSV
+        pdf.to_csv(csv_file_path, index=False)
+        print(f"Delta history exported to {csv_file_path} with metrics: {metric_keys}")

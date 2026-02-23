@@ -1,8 +1,13 @@
 # Data folders
 data/
+data_tests_bak/
 data_tests/bronze
 data_tests/silver
 data_tests/gold
+data_tests/scripts_data_sample_prep
+logs/
+metrics/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

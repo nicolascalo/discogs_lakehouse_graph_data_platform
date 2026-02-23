@@ -1,40 +1,94 @@
-
 services:
+
+#  # =========================
+#  # Unity Catalog (Metadata Service)
+#  # =========================
+#  uc-server:
+#    image: unitycatalog/unitycatalog:v0.3.1
+#    container_name: server
+#    hostname: server
+#    ports:
+#      - "8081:8080"           # Host 8081 → UC server web UI
+#      - "9083:9083"
+#      
+#    volumes:
+#      - ./unity_catalog/etc/conf:/opt/unitycatalog/etc/conf
+#      - ./unity_catalog/data:/opt/unitycatalog/etc/data
+#    networks:
+#      - discogs-net
+#    environment:
+#      UNITYCATALOG_TOKEN: test-token      
+#
+#  uc-ui:
+#    build: ./unity_catalog/ui/
+#    container_name: uc-ui
+#    ports:
+#      - "8082:3000"           # Host 8082 → UC UI
+#    depends_on:
+#      - uc-server
+#    networks:
+#      - discogs-net
 
   # =========================
   # Spark Standalone Cluster
   # =========================
-
   spark-master:
-    build:
-      context: ./docker/spark
-      dockerfile: Dockerfile
+    build: ./docker/spark
+    image: my-spark:latest
     container_name: spark-master
     hostname: spark-master
     command: >
       /opt/spark/bin/spark-class
       org.apache.spark.deploy.master.Master
     ports:
-      - "7077:7077"
-      - "8080:8080"
-      - "8888:8888"
+      - "7077:7077"   # Spark cluster master port
+      - "8083:8080"   # Spark UI
     volumes:
-      - ./app:/app          # shared Python modules
-      - ./jobs:/jobs    # ingestion scripts
-      - ./logs:/logs    # logs
-      - ./data:/data        # Delta tables
-      - ./data_tests:/data_tests        # Delta test tables
-      - ./config:/config        # Config files
-      
+      - ./debug:/opt/spark/work-dir
+      - ./jobs:/jobs
+      - ./logs:/logs
+      - ./data:/data
+      - ./metrics:/metrics
+      - ./data_tests:/data_tests
+      - ./config:/config
     networks:
       - discogs-net
     env_file: ".env"
-    
+
+  spark-notebook:
+    build: ./docker/spark
+    image: my-spark:latest
+    container_name: spark-notebook
+    hostname: spark-notebook
+    command: >
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=''
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./debug:/opt/spark/work-dir
+      - ./jobs:/jobs
+      - ./logs:/logs
+      - ./data:/data
+      - ./metrics:/metrics
+      - ./data_tests:/data_tests
+      - ./config:/config
+    networks:
+      - discogs-net
+    env_file: ".env"
+    depends_on:
+      - spark-master
+    environment:
+      - PYTHONPATH=/jobs      
 
   spark-worker:
-    build:
-      context: ./docker/spark
-      dockerfile: Dockerfile
+    build: ./docker/spark
+    image: my-spark:latest
+    container_name: spark-worker
     depends_on:
       - spark-master
     command: >
@@ -45,140 +99,135 @@ services:
       SPARK_WORKER_CORES: 4
       SPARK_WORKER_MEMORY: 2g
     volumes:
-      - ./app:/app
+      - ./debug:/opt/spark/work-dir
       - ./jobs:/jobs
-      - ./logs:/logs    # logs
-      - ./data:/data        # Delta tables
-      - ./data_tests:/data_tests        # Delta test tables
-      - ./config:/config        # Config files
+      - ./logs:/logs
+      - ./data:/data
+      - ./metrics:/metrics
+      - ./data_tests:/data_tests
+      - ./config:/config
     networks:
       - discogs-net
     env_file: ".env"
 
-  # =========================
-  # Airflow
-  # =========================
 
 
-  airflow:
-    build: ./docker/airflow
-    container_name: airflow
-    depends_on:
-      - spark-master
-      - postgres
-    command: airflow standalone
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    ports:
-      - "8081:8080"
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./app:/app
-      - ./data:/data
-    networks:
-      - discogs-net
-
-  # =========================
-  # PostgreSQL (Serving Layer)
-  # =========================
-
-  postgres:
-    image: postgres:16
-    container_name: postgres
-    environment:
-      POSTGRES_USER: discogs
-      POSTGRES_PASSWORD: discogs
-      POSTGRES_DB: discogs_dw
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - discogs-net
-
-  # =========================
-  # Neo4j (Graph Analytics)
-  # =========================
-
-  neo4j:
-    image: neo4j:5
-    container_name: neo4j
-    environment:
-      NEO4J_AUTH: neo4j/discogs
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4jdata:/data
-    networks:
-      - discogs-net
-
-  # =========================
-  # dbt (Postgres Transformations)
-  # =========================
-
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
-    container_name: dbt
-    depends_on:
-      - postgres
-    volumes:
-      - ./dbt:/usr/app
-    working_dir: /usr/app
-    command: dbt run
-    networks:
-      - discogs-net
-
-  # =========================
-  # Dash (User-Facing App)
-  # =========================
-
-  dash:
-    build: ./dash
-    container_name: dash
-    depends_on:
-      - postgres
-    ports:
-      - "8050:8050"
-    networks:
-      - discogs-net
-
-  # =========================
-  # Prometheus
-  # =========================
-
-  prometheus:
-    image: prom/prometheus
-    container_name: prometheus
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    networks:
-      - discogs-net
-
-  # =========================
-  # Grafana
-  # =========================
-
-  grafana:
-    image: grafana/grafana
-    container_name: grafana
-    depends_on:
-      - prometheus
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafanadata:/var/lib/grafana
-    networks:
-      - discogs-net
-
+#
+#  # =========================
+#  # PostgreSQL (Data Warehouse)
+#  # =========================
+#  postgres:
+#    image: postgres:16
+#    container_name: postgres
+#    environment:
+#      POSTGRES_USER: discogs
+#      POSTGRES_PASSWORD: discogs
+#      POSTGRES_DB: discogs_dw
+#    ports:
+#      - "5432:5432"
+#    volumes:
+#      - pgdata:/var/lib/postgresql/data
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # dbt (Postgres Transformations)
+#  # =========================
+#  dbt:
+#    image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
+#    container_name: dbt
+#    depends_on:
+#      - postgres
+#    volumes:
+#      - ./dbt:/usr/app
+#    working_dir: /usr/app
+#    command: dbt run
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # Airflow (Optional Orchestration)
+#  # =========================
+#  airflow:
+#    build: ./docker/airflow
+#    container_name: airflow
+#    command: airflow standalone
+#    depends_on:
+#      - spark-master
+#      - postgres
+#    ports:
+#      - "8084:8080"   # Host 8084 → Airflow UI
+#    environment:
+#      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+#      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+#    volumes:
+#      - ./airflow/dags:/opt/airflow/dags
+#      - ./airflow/logs:/opt/airflow/logs
+#      - ./app:/app
+#      - ./data:/data
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # Neo4j (Graph Analytics / Portfolio Graph)
+#  # =========================
+#  neo4j:
+#    image: neo4j:5
+#    container_name: neo4j
+#    environment:
+#      NEO4J_AUTH: neo4j/discogs
+#    ports:
+#      - "7474:7474"   # Browser UI
+#      - "7687:7687"   # Bolt protocol
+#    volumes:
+#      - neo4jdata:/data
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # Dash (User-Facing App)
+#  # =========================
+#  dash:
+#    build: ./dash
+#    container_name: dash
+#    depends_on:
+#      - postgres
+#    ports:
+#      - "8050:8050"
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # Prometheus (Monitoring)
+#  # =========================
+#  prometheus:
+#    image: prom/prometheus
+#    container_name: prometheus
+#    ports:
+#      - "9090:9090"
+#    volumes:
+#      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+#    networks:
+#      - discogs-net
+#
+#  # =========================
+#  # Grafana (Monitoring Dashboard)
+#  # =========================
+#  grafana:
+#    image: grafana/grafana
+#    container_name: grafana
+#    depends_on:
+#      - prometheus
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - grafanadata:/var/lib/grafana
+#    networks:
+#      - discogs-net
+#
 # =========================
-# Volumes
+# Named Volumes
 # =========================
-
 volumes:
   pgdata:
   neo4jdata:
@@ -187,7 +236,6 @@ volumes:
 # =========================
 # Network
 # =========================
-
 networks:
   discogs-net:
     driver: bridge

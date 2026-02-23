@@ -1,0 +1,180 @@
+[
+    {
+        "layer_input": "bronze",
+        "layer_output": "silver",
+        "table_input": "artists",
+        "table_output": "artists",
+        "primary_key": "id",
+        "keep": [
+            "data_quality",
+            "groups",
+            "id",
+            "members",
+            "name",
+            "realname"
+        ],
+        "homogeneize": [
+            "groups",
+            "members"
+        ],
+        "split": [
+            {
+                "path": "data_quality",
+                "name": "data_quality",
+                "delimiter": "ds"
+            }
+        ],
+        "enrich": [
+    {
+        "path": "groups",
+        "name": "groups_hash",
+        "expr": "__hash__"
+    },
+    {
+        "path": "members",
+        "name": "members_hash",
+        "expr": "__hash__"
+    },            
+            {
+                "path": "test",
+                "name": "test",
+                "expr": "'fdgdfh'"
+            }
+        ]
+    },
+    {
+        "layer_input": "bronze",
+        "layer_output": "silver",
+        "table_input": "releases",
+        "table_output": "releases",
+        "primary_key": "@id",
+        "keep": [
+            "@id",
+            "@status",
+            "artists",
+            "extraartists",
+            "genres",
+            "released",
+            "styles",
+            "title",
+            "tracklist"
+        ],
+        
+        "homogeneize": [
+            "extraartists.artist",
+            "artists.artist",
+            "tracklist.track",
+            "tracklist.track.extraartists.artist",
+            "tracklist.track.sub_tracks.track.extraartists.artists.artist"
+        ],
+        "split": [
+            {
+                "path": "artists.artist.name",
+                "name": "test",
+                "delimiter": "su"
+            },
+            {
+                "path": "extraartists.artist.role",
+                "name": "role",
+                "delimiter": ", *"
+            },
+            {
+                "path": "extraartists.artist.tracks",
+                "name": "tracks",
+                "delimiter": ", *"
+            },
+            {
+                "path": "tracklist.track.extraartists.artist.role",
+                "name": "role",
+                "delimiter": ", *"
+            }
+        ],
+        "enrich": [
+            {
+                "path": "test",
+                "name": "test",
+                "expr": "'fdgdfh'"
+            },
+            
+            {
+                "path": "artists.artist",
+                "name": "role",
+                "expr": "'Release artist'"
+            },
+            {
+                "path": "tracklist.track",
+                "name": "track_hash",
+                "expr": "__hash__" 
+            },
+            {
+                "path": "tracklist.track.sub_tracks.track",
+                "name": "subtrack_hash",
+                "expr": "__hash__" 
+            },
+                {
+                "path": "extraartists.artist",
+                "name": "tracks",
+                "expr": "coalesce(x.tracks, 'All')"
+            }
+        ],
+                "explode": [
+            {
+                "path": "artists.artist",
+                "table": "release_artists",
+                "auto_hash": true,
+                "parent_ids": [
+                    "@id"
+                ]
+            },
+            {
+                "path": "extraartists.artist",
+                "table": "release_extraartists",
+                "auto_hash": true,
+                "parent_ids": [
+                    "@id"
+                ]
+            },
+            {
+                "path": "extraartists.artist.role",
+                "table": "release_extraartist_roles",
+                "auto_hash": true,
+                "parent_ids": [
+                    "@id",
+                    "id"
+                ]
+            },
+            {
+                "path": "tracklist.track",
+                "table": "tracks",
+                "auto_hash": true,
+                "parent_ids": [
+                    "@id"
+                ]
+            },
+            {
+                "path": "tracklist.track.extraartists.artist",
+                "table": "track_extraartists",
+                "auto_hash": true,
+                "parent_ids": [
+                    "track_hash"
+                ]
+            },
+            {
+                "path": "tracklist.track.sub_tracks.track",
+                "table": "subtracks",
+                "auto_hash": true,
+                "parent_ids": [
+                    "track_hash"
+                ]
+            },
+            {
+                "path": "tracklist.track.sub_tracks.track.extraartists.artists.artist",
+                "table": "subtracks_extraartists",
+                "auto_hash": true,
+                "parent_ids": [
+                    "subtrack_hash"
+                ]
+            }
+        ]
+    }
+]

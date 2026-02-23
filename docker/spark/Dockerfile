@@ -1,35 +1,71 @@
-FROM eclipse-temurin:11-jre-jammy
+FROM eclipse-temurin:17-jre-jammy
 
-ENV SPARK_VERSION=3.5.2
+ENV SPARK_VERSION=4.0.1
+ENV DELTA_SPARK_VERSION=4.0.1
+ENV UNITY_CATALOG_VERSION=0.4.0
 ENV HADOOP_VERSION=3
 ENV SPARK_HOME=/opt/spark
 ENV PATH=$SPARK_HOME/bin:$PATH
 
+# -----------------------------
 # System dependencies
-RUN apt-get update && apt-get install -y curl tar python3 python3-pip && rm -rf /var/lib/apt/lists/*
+# -----------------------------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        python3 \
+        python3-pip \
+        tar \
+        git \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
+# -----------------------------
 # Download and extract Spark
-RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-scala2.13.tgz \
+# -----------------------------
+RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-connect.tgz \
     | tar -xz -C /opt && \
-    mv /opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-scala2.13 /opt/spark
-
-# Download spark-xml jar compatible with Spark 3.5 + Scala 2.13
-RUN curl -fsSL https://repo1.maven.org/maven2/com/databricks/spark-xml_2.13/0.15.0/spark-xml_2.13-0.15.0.jar \
-    -o ${SPARK_HOME}/jars/spark-xml_2.13-0.15.0.jar
-
-# Download Delta Spark jar (for Spark 3.5 + Scala 2.13)
-RUN curl -fsSL https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/3.2.0/delta-spark_2.13-3.2.0.jar \
-    -o ${SPARK_HOME}/jars/delta-spark_2.13-3.2.0.jar
+    mv /opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-connect /opt/spark
 
 
-# Delta Spark integration (Scala 2.13, version 3.3.2)
-RUN curl -fsSL https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/3.3.2/delta-spark_2.13-3.3.2.jar \
-    -o ${SPARK_HOME}/jars/delta-spark_2.13-3.3.2.jar
+# -----------------------------
+# Download Delta + Unity Catalog JARs
+# -----------------------------
+RUN mkdir -p $SPARK_HOME/jars && cd $SPARK_HOME/jars && \
+    curl -fsSL -O https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/${DELTA_SPARK_VERSION}/delta-spark_2.13-${DELTA_SPARK_VERSION}.jar && \
+    curl -fsSL -O https://repo1.maven.org/maven2/io/delta/delta-storage/${DELTA_SPARK_VERSION}/delta-storage-${DELTA_SPARK_VERSION}.jar && \
+#    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-spark_2.13/${UNITY_CATALOG_VERSION}/unitycatalog-spark_2.13-${UNITY_CATALOG_VERSION}.jar && \
+#    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-client/${UNITY_CATALOG_VERSION}/unitycatalog-client-${UNITY_CATALOG_VERSION}.jar && \
+    curl -fsSL -O https://repo1.maven.org/maven2/com/fasterxml/jackson/dataformat/jackson-dataformat-xml/2.15.0/jackson-dataformat-xml-2.15.0.jar
 
-# Delta storage implementation (no Scala suffix)
-RUN curl -fsSL https://repo1.maven.org/maven2/io/delta/delta-storage/3.3.2/delta-storage-3.3.2.jar \
-    -o ${SPARK_HOME}/jars/delta-storage-3.3.2.jar
+# -----------------------------
+# Install Python packages
+# -----------------------------
+RUN pip3 install uv
 
     
-# Python dependencies
-RUN pip3 install --no-cache-dir pyspark==${SPARK_VERSION} delta-spark pyarrow lxml psycopg2-binary neo4j jupyter ipython pandas
+RUN uv pip install --system --no-cache-dir \
+    pyspark==${SPARK_VERSION} \
+    delta-spark==${DELTA_SPARK_VERSION} \
+    zstandard>=0.25.0 \
+    pyarrow \
+    lxml \
+    pandas \
+    jupyter \
+    requests \
+    boto3 \
+    dotenv \
+    ipython \
+    psycopg2-binary \
+    grpcio>=1.48.1 \
+    grpcio-status>=1.48.1 \
+    neo4j
+
+    
+# -----------------------------
+# Set Spark work directory
+# -----------------------------
+WORKDIR $SPARK_HOME/work-dir
+
+# Entrypoint (optional)
+CMD ["/bin/bash"]
