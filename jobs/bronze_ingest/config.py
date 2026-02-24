@@ -35,5 +35,6 @@ class BronzeConfig:
             archive_dir=(data_dir / "raw" / "archive"),
             config_file=config_file,
             primary_keys=bronze_config["PRIMARY_KEYS"],
-            export_history_to_csv=os.getenv("EXPORT_HISTORY_TO_CSV", "false").lower() == "true",
+            export_history_to_csv=os.getenv("EXPORT_HISTORY_TO_CSV", "false").lower()
+            == "true",
         )

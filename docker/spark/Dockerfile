@@ -59,6 +59,8 @@ RUN uv pip install --system --no-cache-dir \
     psycopg2-binary \
     grpcio>=1.48.1 \
     grpcio-status>=1.48.1 \
+    httpx \
+    httpx[http2] \
     neo4j
 
     

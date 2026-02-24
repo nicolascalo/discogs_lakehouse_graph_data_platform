@@ -13,7 +13,7 @@ from bronze_ingest.delta_metrics import (
 from bronze_ingest.schemas import export_schemas
 from bronze_ingest.spark_session import create_spark_session
 from bronze_ingest.transform import read_xml_to_df, apply_hash
-from bronze_ingest.validation import validate_file_hash
+from jobs.file_helpers.validation import validate_file_hash
 from bronze_ingest.delta_merge import merge_into_bronze
 from bronze_ingest.create_delta import create_new_bronze
 from bronze_ingest.config import BronzeConfig

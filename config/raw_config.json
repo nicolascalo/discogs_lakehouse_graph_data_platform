@@ -1,5 +1,5 @@
 {
-"DISCOGS_DUMP_URL_ROOT" : "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data",
+"DISCOGS_DUMP_URL_ROOT" : "https://data.discogs.com/?download=data",
 "DISC_PREFIX" : "discogs_",
 "DISC_SUFFIX_LIST" : 
 [
@@ -15,5 +15,6 @@
 "LOG_PROGRESS_EVERY_MB" : 10,
 "CHUNK_SIZE" : 1048576,
 "RETRIES" : 5,
-"TIMEOUT" : [10, 300]   
+"TIMEOUT" : 30 
 }
+
