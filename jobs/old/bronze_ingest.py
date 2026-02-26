@@ -14,9 +14,9 @@ import pandas as pd
 import hashlib
 
 
-from ingest_helpers.file_info_helpers import *
-from ingest_helpers.spark_df_helpers import *
-from ingest_helpers.config_helpers import *
+from helpers_ingest.file_info_helpers import *
+from helpers_ingest.spark_df_helpers import *
+from helpers_ingest.config_helpers import *
 
 from typing import List, Dict, Optional
 from pyspark.sql import DataFrame
@@ -38,7 +38,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "discogs_bronze_ingest.log"
 LOG_FILE.touch(exist_ok=True)
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data_tests"))
+DATA_DIR = Path(os.getenv("DATA_DIR"))
 
 RAW_DATA_DIR = DATA_DIR / "raw"
 

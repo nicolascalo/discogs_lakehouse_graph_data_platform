@@ -5,9 +5,7 @@ from delta.tables import DeltaTable
 from pyspark.sql import functions as F
 
 
-from ingest_helpers.file_info_helpers import *
-from ingest_helpers.spark_df_helpers import *
-from ingest_helpers.config_helpers import *
+from helpers_ingest.file_info_helpers import extract_dump_date, extract_dump_type
 
 from typing import List, Dict
 
@@ -34,13 +32,6 @@ def get_latest_dump_date(
         return None
 
 
-def get_output_dir(dump_type: str, logger, data_folder) -> str:
-    output_dir = os.path.join(data_folder, dump_type)
-    logger.info(f"{output_dir = }")
-
-    output_dir_path = Path(output_dir)
-    output_dir_path.mkdir(parents=True, exist_ok=True)
-    return output_dir
 
 
 def get_latest_dump_files(raw_dir: Path, logger) -> List[Dict[str, str]]:

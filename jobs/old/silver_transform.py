@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession, functions as F
 import pandas as pd
 
 from ingest_helpers.folder_helpers import get_folder_list, get_dump_dates
-from ingest_helpers.config_helpers import load_config_from_json
+from helpers_ingest.config_helpers import load_config_from_json
 from ingest_helpers.info_output_helpers import (
     get_or_create_last_log,
     get_last_dump_date,

@@ -1,0 +1,6 @@
+{
+    "PRIMARY_KEYS": {
+        "artists": "id",
+        "releases": "@id"
+    }
+}

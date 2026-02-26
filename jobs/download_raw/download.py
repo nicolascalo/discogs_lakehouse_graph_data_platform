@@ -1,30 +1,282 @@
 import os
-import math
 import requests
 import datetime
-from concurrent.futures import ThreadPoolExecutor
 import re
 import httpx
 import time
 
 
-def supports_range(url):
-    r = requests.get(url, headers={"Range": "bytes=0-0"}, stream=True)
-    return r.status_code == 206
+
+from boto3.s3.transfer import TransferConfig
 
 
-def retrieve_downloaded_dumps(dir: str) -> set[str]:
-    return {f for f in os.listdir(dir) if f.startswith("discogs_")}
+MIN_S3_PART_SIZE = 5 * 1024 * 1024  # 5 MB minimum for multipart
 
 
-def check_server_parallel_download(url: str, logger):
-    test = requests.get(url, headers={"Range": "bytes=0-0"}, stream=True)
-    if test.status_code != 206:
-        logger.info("Server does not support range requests")
-        return False
-    else:
-        logger.info("Server supports range requests")
-        return True
+
+def download_file_to_minio_stream(
+    url: str,
+    bucket: str,
+    object_key: str,
+    logger,
+    s3,
+    chunk_size: int = 4 * 1024 * 1024,
+    timeout: int = 60,
+    max_retries: int = 3
+):
+    """
+    Fully streaming download from HTTP → MinIO (S3) with manual multipart upload.
+    Works for unknown Content-Length and very large files.
+    """
+
+    # skip if exists
+    try:
+        s3.head_object(Bucket=bucket, Key=object_key)
+        logger.info("Already exists in MinIO: s3://%s/%s", bucket, object_key)
+        return
+    except s3.exceptions.ClientError:
+        pass
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # start multipart upload
+            mpu = s3.create_multipart_upload(Bucket=bucket, Key=object_key)
+            upload_id = mpu["UploadId"]
+            parts = []
+            part_number = 1
+            buffer = bytearray()
+            downloaded = 0
+
+            with httpx.stream("GET", url, timeout=timeout) as response:
+                response.raise_for_status()
+                total_size = int(response.headers.get("Content-Length", 0))
+                start_time = time.time()
+
+                for chunk in response.iter_bytes(chunk_size):
+                    buffer.extend(chunk)
+                    downloaded += len(chunk)
+
+                    # show progress
+                    if total_size:
+                        percent = downloaded / total_size * 100
+                        speed = downloaded / (time.time() - start_time) / 1e6
+                        print(f"\r{downloaded / 1e6:.2f}/{total_size / 1e6:.2f} MB "
+                              f"({percent:.1f}%, {speed:.2f} MB/s)", end="", flush=True)
+                    else:
+                        speed = downloaded / (time.time() - start_time) / 1e6
+                        print(f"\r{downloaded / 1e6:.2f} MB downloaded ({speed:.2f} MB/s)",
+                              end="", flush=True)
+
+                    # upload full parts
+                    while len(buffer) >= MIN_S3_PART_SIZE:
+                        part = s3.upload_part(
+                            Bucket=bucket,
+                            Key=object_key,
+                            PartNumber=part_number,
+                            UploadId=upload_id,
+                            Body=buffer[:MIN_S3_PART_SIZE]
+                        )
+                        parts.append({"ETag": part["ETag"], "PartNumber": part_number})
+                        buffer = buffer[MIN_S3_PART_SIZE:]
+                        part_number += 1
+
+                # upload remaining buffer
+                if buffer:
+                    part = s3.upload_part(
+                        Bucket=bucket,
+                        Key=object_key,
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=bytes(buffer)
+                    )
+                    parts.append({"ETag": part["ETag"], "PartNumber": part_number})
+
+            # complete multipart upload
+            s3.complete_multipart_upload(
+                Bucket=bucket,
+                Key=object_key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts}
+            )
+
+            print("\nUpload complete")
+            logger.info("Streaming upload complete: s3://%s/%s", bucket, object_key)
+            return
+
+        except Exception as e:
+            print()
+            logger.warning("Retry %d/%d failed: %s", attempt, max_retries, e)
+            try:
+                s3.abort_multipart_upload(Bucket=bucket, Key=object_key, UploadId=upload_id)
+            except Exception:
+                pass
+            if attempt == max_retries:
+                raise
+
+
+
+
+            
+def download_file_httpx_s3(
+    url: str,
+    bucket: str,
+    object_key: str,
+    logger,
+    s3,
+    chunk_size: int = 4 * 1024 * 1024,  # 4MB
+    timeout: int = 60,
+    max_retries: int = 3,
+):
+    """
+    Download a file via httpx and upload it to S3/MinIO.
+    Works with unknown Content-Length and large files.
+    """
+
+    # Check if object already exists in MinIO
+    try:
+        s3.head_object(Bucket=bucket, Key=object_key)
+        logger.info("File already exists in MinIO: s3://%s/%s", bucket, object_key)
+        return
+    except s3.exceptions.ClientError:
+        pass  # proceed to download
+
+    # Use a temp file like in your local function
+    temp_path = object_key.replace("/", "_") + ".part"
+
+    limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
+    timeout_config = httpx.Timeout(connect=timeout, read=timeout, write=timeout, pool=timeout)
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.Client(http2=True, limits=limits, timeout=timeout_config, follow_redirects=True) as client:
+                with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    total_size = int(response.headers.get("Content-Length", 0))
+                    downloaded = 0
+                    start_time = time.time()
+
+                    with open(temp_path, "wb") as f:
+                        for chunk in response.iter_bytes(chunk_size):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                if total_size:
+                                    elapsed = time.time() - start_time
+                                    speed = downloaded / elapsed / 1e6
+                                    print(
+                                        f"\r{downloaded / 1e6:.2f}/{total_size / 1e6:.2f} MB "
+                                        f"({speed:.2f} MB/s)",
+                                        end="",
+                                        flush=True,
+                                    )
+
+            # download complete, now upload to S3/MinIO
+            logger.info("\nUploading to s3://%s/%s", bucket, object_key)
+            s3.upload_file(temp_path, bucket, object_key)
+            logger.info("Upload complete: s3://%s/%s", bucket, object_key)
+
+            # cleanup temp file
+            os.remove(temp_path)
+            break  # success
+
+        except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.HTTPError) as e:
+            print(f"\nRetry {attempt}/{max_retries} due to: {e}")
+            if attempt == max_retries:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise
+
+
+class HTTPXStreamAdapter:
+    """
+    Wrap httpx byte iterator into file-like object for boto3.
+    """
+
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.buffer = b""
+
+    def read(self, size=-1):
+        try:
+            return next(self.iterator)
+        except StopIteration:
+            return b""
+
+
+def download_file_to_minio(
+    url: str,
+    bucket: str,
+    object_key: str,
+    logger,
+    chunk_size: int = 8 * 1024 * 1024,
+    timeout: int = 60,
+    max_retries: int = 3,
+):
+    
+    
+
+
+    # Skip if exists
+    try:
+        s3.head_object(Bucket=bucket, Key=object_key)
+        logger.info("Already exists in MinIO: %s", object_key)
+        return
+    except s3.exceptions.ClientError:
+        pass
+
+    logger.info("Downloading %s → s3://%s/%s", url, bucket, object_key)
+
+    transfer_config = TransferConfig(
+        multipart_threshold=chunk_size,
+        multipart_chunksize=chunk_size,
+        max_concurrency=4,
+        use_threads=True,
+    )
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with httpx.stream("GET", url, timeout=timeout) as response:
+                response.raise_for_status()
+
+                stream = HTTPXStreamAdapter(
+                    response.iter_bytes(chunk_size)
+                )
+
+                s3.upload_fileobj(
+                    stream,
+                    bucket,
+                    object_key,
+                    Config=transfer_config,
+                )
+
+            logger.info("Upload complete: %s", object_key)
+            return
+
+        except Exception as e:
+            logger.warning("Retry %d/%d failed: %s", attempt, max_retries, e)
+            if attempt == max_retries:
+                raise
+            
+            
+def retrieve_downloaded_dumps_s3(bucket: str, prefix: str, s3) -> set[str]:
+    paginator = s3.get_paginator("list_objects_v2")
+
+    dumps = set()
+    print(f"{paginator.paginate(Bucket=bucket, Prefix=prefix)}")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        print(f"{page}")
+        
+        for obj in page.get("Contents", []):
+            print(f"{obj}")
+            name = obj["Key"].split("/")[-1]
+            print(f"{name}")
+            
+            if name.startswith("discogs_"):
+                dumps.add(name)
+
+    return dumps
+
+
 
 
 def download_file_httpx(
@@ -100,156 +352,7 @@ def download_file_httpx(
     return final_path
 
 
-def download_file(
-    url: str, output_dir: str, chunk_size: int = 1024 * 1024, timeout: int = 30
-):
-    os.makedirs(output_dir, exist_ok=True)
 
-    # Get filename (fallback if URL doesn't contain it)
-    local_filename = os.path.basename(url) or "downloaded_file"
-    local_path = os.path.join(output_dir, local_filename)
-
-    if os.path.exists(local_path):
-        print(f"File already exists: {local_filename}")
-        return local_path
-
-    with requests.get(url, stream=True, timeout=timeout, allow_redirects=True) as r:
-        r.raise_for_status()
-
-        total_size = int(r.headers.get("Content-Length", 0))
-        downloaded = 0
-
-        with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-
-                    if total_size:
-                        print(
-                            f"\rDownloading: {downloaded / 1e6:.2f} / {total_size / 1e6:.2f} MB",
-                            end="",
-                            flush=True,
-                        )
-
-    print("\nDownload complete.")
-    return local_path
-
-
-def download_large_file_parallel(
-    url: str,
-    output_dir: str,
-    num_threads: int,
-    num_retries: int,
-    LOG_PROGRESS_EVERY_MB: int,
-    CHUNK_SIZE: int,
-    TIMEOUT: int,
-    logger,
-):
-
-    filename = os.path.basename(url)
-    local_path = os.path.join(output_dir, filename)
-    temp_dir = os.path.join(output_dir, filename + "_parts")
-    os.makedirs(temp_dir, exist_ok=True)
-
-    if os.path.exists(local_path):
-        logger.info("File already downloaded: %s", filename)
-        return
-
-    # Get total file size
-    logger.info(f"{url = }")
-    # r = requests.head(url, timeout=TIMEOUT, allow_redirects=True)
-
-    with requests.get(url, stream=True, allow_redirects=True) as r:
-        total_size = r.headers.get("Content-Length")
-
-    if total_size:
-        total_size = int(total_size)
-    else:
-        raise RuntimeError("Cannot determine file size for parallel download")
-
-    # total_size = int(r.headers["Content-Length"])
-    logger.info(f"{total_size = }")
-
-    part_size = math.ceil(total_size / num_threads)
-    ranges = [
-        (i * part_size, min((i + 1) * part_size - 1, total_size - 1))
-        for i in range(num_threads)
-    ]
-
-    logger.info(
-        "Downloading %s with %d parallel ranges, total %.2f MB",
-        filename,
-        num_threads,
-        total_size / 1e6,
-    )
-
-    # Internal function for downloading a range
-    def download_range(idx, start, end):
-        part_path = os.path.join(temp_dir, f"part_{idx}")
-        downloaded = os.path.getsize(part_path) if os.path.exists(part_path) else 0
-        headers = {"Range": f"bytes={start + downloaded}-{end}"}
-        mode = "ab" if downloaded > 0 else "wb"
-
-        retries = 0
-        mb_counter = 0
-        while retries <= num_retries:
-            try:
-                with requests.get(
-                    url, headers=headers, stream=True, timeout=TIMEOUT
-                ) as r:
-                    r.raise_for_status()
-                    with open(part_path, mode) as f:
-                        for chunk in r.iter_content(CHUNK_SIZE):
-                            if chunk:
-                                f.write(chunk)
-                                mb_counter += len(chunk)
-                                if mb_counter >= LOG_PROGRESS_EVERY_MB * 1024 * 1024:
-                                    total_downloaded = sum(
-                                        os.path.getsize(
-                                            os.path.join(temp_dir, f"part_{i}")
-                                        )
-                                        for i in range(num_threads)
-                                    )
-                                    logger.info(
-                                        "Downloading %s: %.2f / %.2f MB",
-                                        filename,
-                                        total_downloaded / 1e6,
-                                        total_size / 1e6,
-                                    )
-                                    mb_counter = 0
-                break  # success
-            except requests.exceptions.ReadTimeout:
-                retries += 1
-                logger.warning(
-                    "TIMEOUT in part %d, retry %d/%d", idx, retries, num_retries
-                )
-            except Exception as e:
-                logger.error("Error in part %d: %s", idx, e)
-                raise
-        else:
-            raise RuntimeError(
-                f"Failed to download part {idx} after {num_retries} retries"
-            )
-
-    # Download all ranges in parallel
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [
-            executor.submit(download_range, idx, start, end)
-            for idx, (start, end) in enumerate(ranges)
-        ]
-        for f in futures:
-            f.result()  # raise any exceptions
-
-    # Combine parts
-    with open(local_path, "wb") as out_f:
-        for i in range(num_threads):
-            part_path = os.path.join(temp_dir, f"part_{i}")
-            with open(part_path, "rb") as pf:
-                out_f.write(pf.read())
-            os.remove(part_path)
-    os.rmdir(temp_dir)
-    logger.info("Finished downloading %s", filename)
 
 
 def get_latest_dump_date(

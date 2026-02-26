@@ -1,6 +1,6 @@
 from delta.tables import DeltaTable
-from bronze_ingest.archive import cleanup_old_raw_files
-from bronze_ingest.file_discovery import get_latest_dump_files, get_latest_dump_date
+from silver_subtables.archive import cleanup_old_raw_files
+from silver_subtables.file_discovery import get_latest_dump_files, get_latest_dump_date
 
 from helpers_files.folders import get_output_dir
 
@@ -11,14 +11,12 @@ from helpers_spark.delta_metrics import (
 )
 from helpers_spark.schemas import export_schemas
 from helpers_spark.spark_session import create_spark_session
-from bronze_ingest.xml import read_xml_to_df
 from helpers_spark.hash import apply_hash
 from helpers_files.validation import validate_file_hash
 from helpers_spark.delta_merge import merge_into_delta
-from helpers_spark.create_delta import create_new_bronze
+from helpers_spark.create_delta import create_new_silver
 from helpers_spark.serialization import serialize_for_merge
-from bronze_ingest.config import BronzeConfig
-from unitycatalog.config import UCConfig
+from silver_subtables.config import SilverConfig
 
 import datetime
 
@@ -95,28 +93,24 @@ def process_single_dump(spark, dump, config, logger):
             )
 
             output_dir = get_output_dir(
-                dump_type, logger=logger, data_folder=config.bronze_data_dir
+                dump_type, logger=logger, data_folder=config.silver_data_dir
             )
 
             if not DeltaTable.isDeltaTable(spark, output_dir):
-                create_new_bronze(df_mergeable, output_dir, table_name=f"bronze_{dump_type}", logger=logger)
+                create_new_silver(df_mergeable, output_dir, logger=logger)
                 create_new_delta_history(spark)
 
             else:
                 merge_into_delta(
-                    spark, df_mergeable, output_dir, primary_key, hash_col = "root_hash", logger=logger
+                    spark, df_mergeable, output_dir, primary_key,hash_col="root_hash", logger=logger
                 )
-
-
-
-
 
             export_schemas(
                 df_mergeable,
                 dump_type=dump_type,
                 dump_date=latest_dump_date_to_process,
                 logger=logger,
-                data_dir=config.bronze_data_dir,
+                data_dir=config.silver_data_dir,
             )
             export_delta_table_history(
                 spark,
@@ -124,10 +118,9 @@ def process_single_dump(spark, dump, config, logger):
                 latest_dump_date_to_process,
                 output_dir=output_dir,
                 input_layer="raw",
-                output_layer="bronze",
+                output_layer="silver",
                 logger=logger,
                 LOG_DIR=config.log_dir,
-                table_name = f"bronze_{dump_type}_metrics",
                 EXPORT_HISTORY_TO_CSV=config.export_history_to_csv,
             )
 
@@ -161,7 +154,7 @@ def process_single_dump(spark, dump, config, logger):
         raise
 
 
-def main(spark, config: BronzeConfig, logger):
+def main(spark, config: SilverConfig, logger):
 
     raw_dumps = get_latest_dump_files(raw_dir=config.raw_data_dir, logger=logger)
 
@@ -173,19 +166,9 @@ def main(spark, config: BronzeConfig, logger):
 
 
 if __name__ == "__main__":
-    config = BronzeConfig.from_env()
-    config_uc = UCConfig.from_env()
-
-    
-    
-    spark = create_spark_session(
-        app_name="discogs-bronze-ingest",
-        MINIO_ENDPOINT=config_uc.minio_endpoint,
-        MINIO_ACCESS_KEY=config_uc.minio_access_key,
-        MINIO_SECRET_KEY=config_uc.minio_secret_key,
-    )
-    
-    logger = setup_logger(config.log_dir / "discogs_bronze_ingest.log")
+    config = SilverConfig.from_env()
+    spark = create_spark_session("discogs-silver-subtables")
+    logger = setup_logger(config.log_dir / "discogs_silver_subtables.log")
     try:
         main(spark, config, logger)
     finally:

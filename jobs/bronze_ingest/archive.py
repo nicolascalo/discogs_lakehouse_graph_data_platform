@@ -2,18 +2,8 @@ import os
 from pathlib import Path
 
 
-from ingest_helpers.file_info_helpers import *
-from ingest_helpers.spark_df_helpers import *
-from ingest_helpers.config_helpers import *
-
-
-from ingest_helpers.file_info_helpers import *
-from ingest_helpers.spark_df_helpers import *
-from ingest_helpers.config_helpers import *
-
-
 def cleanup_old_raw_files(
-    latest_dump_date: str, dump_type: str, RAW_DATA_DIR: Path
+    latest_dump_date: str, dump_type: str, RAW_DATA_DIR: Path, archive_dir_name:str = "archive"
 ) -> None:
     raw_data_file_list = os.listdir(RAW_DATA_DIR)
     raw_data_file_list_to_archive = [
@@ -26,6 +16,6 @@ def cleanup_old_raw_files(
     for file in raw_data_file_list_to_archive:
         file_path = Path(RAW_DATA_DIR) / file
         if os.path.exists(file_path):
-            archive_dir = RAW_DATA_DIR / "archive"
+            archive_dir = RAW_DATA_DIR / archive_dir_name
             file_path.rename(archive_dir / file_path.name)
     return None

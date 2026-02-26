@@ -1,48 +1,97 @@
+
+# =========================
+# Named Volumes
+# =========================
+volumes:
+  pgdata:
+  uc-pgdata:
+  neo4jdata:
+  grafanadata:
+  unitycatalog_data:
+  miniodata: 
+
+# =========================
+# Network
+# =========================
+networks:
+  discogs-net:
+    driver: bridge
+
+
 services:
 
-#  # =========================
-#  # Unity Catalog (Metadata Service)
-#  # =========================
-#  uc-server:
-#    image: unitycatalog/unitycatalog:v0.3.1
-#    container_name: server
-#    hostname: server
-#    ports:
-#      - "8081:8080"           # Host 8081 → UC server web UI
-#      - "9083:9083"
-#      
-#    volumes:
-#      - ./unity_catalog/etc/conf:/opt/unitycatalog/etc/conf
-#      - ./unity_catalog/data:/opt/unitycatalog/etc/data
-#    networks:
-#      - discogs-net
-#    environment:
-#      UNITYCATALOG_TOKEN: test-token      
-#
-#  uc-ui:
-#    build: ./unity_catalog/ui/
-#    container_name: uc-ui
-#    ports:
-#      - "8082:3000"           # Host 8082 → UC UI
-#    depends_on:
-#      - uc-server
-#    networks:
-#      - discogs-net
+  # =========================
+  # Unity Catalog
+  # =========================
+  uc-server:
+    build:
+      context: ./docker/unitycatalog
+      dockerfile: Dockerfile
+    container_name: uc-server
+    hostname: uc-server
+    ports:
+      - "8081:8080"   # host 8081 → container 8080
+    volumes:
+      - ./config/unitycatalog/etc/conf:/opt/unitycatalog/etc/conf
+      - ./data/unitycatalog:/opt/unitycatalog/etc/data
+    networks:
+      - discogs-net
+    environment:
+      UNITYCATALOG_TOKEN: test-token
+      AWS_REGION: us-east-1
+      # These tell UC's S3 client to use MinIO
+      UC_S3_ENDPOINT: http://minio:9000
+      UC_S3_PATH_STYLE_ACCESS: "true"
+    depends_on:
+      - minio
+
+  uc-ui:
+    build:
+      context: ./docker/unitycatalog-ui
+      dockerfile: Dockerfile
+    container_name: uc-ui
+    ports:
+      - "8082:3000"   # host 8082 → container 3000
+    depends_on:
+      - uc-server
+    networks:
+      - discogs-net
+    environment:
+      REACT_APP_API_URL: http://uc-server:8080
+
+
+  minio:
+    image: minio/minio:latest
+    container_name: uc-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - discogs-net
 
   # =========================
   # Spark Standalone Cluster
   # =========================
+
   spark-master:
     build: ./docker/spark
     image: my-spark:latest
     container_name: spark-master
     hostname: spark-master
     command: >
-      /opt/spark/bin/spark-class
-      org.apache.spark.deploy.master.Master
+      bash -c "
+        /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master & jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+      "
     ports:
-      - "7077:7077"   # Spark cluster master port
+      - "7077:7077"   # Spark master cluster port
       - "8083:8080"   # Spark UI
+      - "8888:8888"   # Jupyter Lab
     volumes:
       - ./debug:/opt/spark/work-dir
       - ./jobs:/jobs
@@ -54,36 +103,11 @@ services:
     networks:
       - discogs-net
     env_file: ".env"
-
-  spark-notebook:
-    build: ./docker/spark
-    image: my-spark:latest
-    container_name: spark-notebook
-    hostname: spark-notebook
-    command: >
-      jupyter lab
-      --ip=0.0.0.0
-      --port=8888
-      --no-browser
-      --allow-root
-      --NotebookApp.token=''
-    ports:
-      - "8888:8888"
-    volumes:
-      - ./debug:/opt/spark/work-dir
-      - ./jobs:/jobs
-      - ./logs:/logs
-      - ./data:/data
-      - ./metrics:/metrics
-      - ./data_tests:/data_tests
-      - ./config:/config
-    networks:
-      - discogs-net
-    env_file: ".env"
-    depends_on:
-      - spark-master
     environment:
-      - PYTHONPATH=/jobs      
+      - SPARK_CONF_DIR=/config
+    depends_on:
+      - uc-server
+      - minio
 
   spark-worker:
     build: ./docker/spark
@@ -98,6 +122,8 @@ services:
     environment:
       SPARK_WORKER_CORES: 4
       SPARK_WORKER_MEMORY: 2g
+      SPARK_CONF_DIR: /config
+      
     volumes:
       - ./debug:/opt/spark/work-dir
       - ./jobs:/jobs
@@ -109,7 +135,6 @@ services:
     networks:
       - discogs-net
     env_file: ".env"
-
 
 
 #
@@ -225,17 +250,3 @@ services:
 #    networks:
 #      - discogs-net
 #
-# =========================
-# Named Volumes
-# =========================
-volumes:
-  pgdata:
-  neo4jdata:
-  grafanadata:
-
-# =========================
-# Network
-# =========================
-networks:
-  discogs-net:
-    driver: bridge

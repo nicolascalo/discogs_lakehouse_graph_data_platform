@@ -6,8 +6,7 @@
     "_CHECKSUM.txt",
     "_masters.xml.gz",
     "_labels.xml.gz",
-    "_artists.xml.gz",
-    "_releases.xml.gz"
+    "_artists.xml.gz"
 
 ],
 "YEAR_LIMIT_PAST" : 2007,

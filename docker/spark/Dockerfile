@@ -2,7 +2,7 @@ FROM eclipse-temurin:17-jre-jammy
 
 ENV SPARK_VERSION=4.0.1
 ENV DELTA_SPARK_VERSION=4.0.1
-ENV UNITY_CATALOG_VERSION=0.4.0
+ENV UNITY_CATALOG_VERSION=0.3.1
 ENV HADOOP_VERSION=3
 ENV SPARK_HOME=/opt/spark
 ENV PATH=$SPARK_HOME/bin:$PATH
@@ -28,22 +28,29 @@ RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spar
     mv /opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-connect /opt/spark
 
 
+# Install Hadoop AWS + AWS SDK v2 for S3A
+RUN mkdir -p /opt/spark/jars && \
+    curl -L -o /opt/spark/jars/hadoop-aws-3.4.1.jar \
+        https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.1/hadoop-aws-3.4.1.jar && \
+    curl -L -o /opt/spark/jars/aws-java-sdk-bundle-1.12.661.jar \
+        https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.661/aws-java-sdk-bundle-1.12.661.jar && \
+    curl -L -o /opt/spark/jars/bundle-2.29.38.jar \
+        https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.29.38/bundle-2.29.38.jar        
+        
 # -----------------------------
 # Download Delta + Unity Catalog JARs
 # -----------------------------
 RUN mkdir -p $SPARK_HOME/jars && cd $SPARK_HOME/jars && \
     curl -fsSL -O https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/${DELTA_SPARK_VERSION}/delta-spark_2.13-${DELTA_SPARK_VERSION}.jar && \
     curl -fsSL -O https://repo1.maven.org/maven2/io/delta/delta-storage/${DELTA_SPARK_VERSION}/delta-storage-${DELTA_SPARK_VERSION}.jar && \
-#    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-spark_2.13/${UNITY_CATALOG_VERSION}/unitycatalog-spark_2.13-${UNITY_CATALOG_VERSION}.jar && \
-#    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-client/${UNITY_CATALOG_VERSION}/unitycatalog-client-${UNITY_CATALOG_VERSION}.jar && \
+    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-spark_2.13/${UNITY_CATALOG_VERSION}/unitycatalog-spark_2.13-${UNITY_CATALOG_VERSION}.jar && \
+    curl -fsSL -O https://repo1.maven.org/maven2/io/unitycatalog/unitycatalog-client/${UNITY_CATALOG_VERSION}/unitycatalog-client-${UNITY_CATALOG_VERSION}.jar && \
     curl -fsSL -O https://repo1.maven.org/maven2/com/fasterxml/jackson/dataformat/jackson-dataformat-xml/2.15.0/jackson-dataformat-xml-2.15.0.jar
 
 # -----------------------------
 # Install Python packages
 # -----------------------------
 RUN pip3 install uv
-
-    
 RUN uv pip install --system --no-cache-dir \
     pyspark==${SPARK_VERSION} \
     delta-spark==${DELTA_SPARK_VERSION} \
@@ -61,7 +68,8 @@ RUN uv pip install --system --no-cache-dir \
     grpcio-status>=1.48.1 \
     httpx \
     httpx[http2] \
-    neo4j
+    neo4j \
+    botocore
 
     
 # -----------------------------

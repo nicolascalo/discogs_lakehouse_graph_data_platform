@@ -19,7 +19,7 @@ from ingest_helpers.spark_processing_helpers import (
     extract_required_roots,
 )
 from ingest_helpers.folder_helpers import get_folder_list, get_dump_dates
-from ingest_helpers.config_helpers import load_config_from_json
+from helpers_ingest.config_helpers import load_config_from_json
 from ingest_helpers.info_output_helpers import (
     get_or_create_last_log,
     get_last_dump_date,

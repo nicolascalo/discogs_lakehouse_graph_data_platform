@@ -2,50 +2,61 @@ import os
 import re
 from download_raw.config import RawConfig
 
+from unitycatalog.config import UCConfig
+from helpers_minio.minio_client import get_minio_client
 
 from download_raw.logging_config import setup_logger
-from download_raw.validate import validate_downloads
+from download_raw.validate import validate_downloads_s3
 from download_raw.download import (
-    download_large_file_parallel,
     get_latest_dump_date,
-    retrieve_downloaded_dumps,
-    download_file_httpx,
-    check_server_parallel_download,
+    retrieve_downloaded_dumps_s3,
+    download_file_to_minio_stream,
 )
 
 
-def download_dump(latest_discogs_dump_url_root, suffix, config):
-    full_url = f"{latest_discogs_dump_url_root}{suffix}"
+def download_dump(latest_discogs_dump_url_root, suffix, config, logger, s3):
 
-    url = full_url
-    output_dir = config.raw_data_dir
-    num_threads = config.PARALLEL_RANGES
-    num_retries = config.RETRIES
-    LOG_PROGRESS_EVERY_MB = config.LOG_PROGRESS_EVERY_MB
-    CHUNK_SIZE = config.CHUNK_SIZE
-    TIMEOUT = config.TIMEOUT
+    url = f"{latest_discogs_dump_url_root}{suffix}"
+    filename = os.path.basename(url)
 
-    if check_server_parallel_download(url, logger):
-        download_large_file_parallel(
-            url,
-            output_dir,
-            num_threads,
-            num_retries,
-            LOG_PROGRESS_EVERY_MB,
-            CHUNK_SIZE,
-            TIMEOUT,
-            logger,
-        )
-    else:
-        download_file_httpx(url, output_dir, logger, CHUNK_SIZE, num_retries, TIMEOUT)
+    logger.info(f"{url = }")
+    logger.info(f"{filename = }")
+
+    download_file_to_minio_stream(
+        url=url,
+        bucket="discogs",
+        object_key=f"{config.data_dir}/raw/{filename}",
+        logger=logger,
+        s3=s3,
+        chunk_size=config.CHUNK_SIZE,
+        timeout=config.TIMEOUT,
+        max_retries=config.RETRIES,
+    )
 
 
 if __name__ == "__main__":
     config = RawConfig.from_env()
-    logger = setup_logger(config.log_dir / "discogs_raw_download.log")
-    os.makedirs(config.raw_data_dir, exist_ok=True)
+    config_uc = UCConfig.from_env()
 
-    already_downloaded = retrieve_downloaded_dumps(str(config.raw_data_dir))
+    s3 = get_minio_client(
+        config_uc.minio_endpoint,
+        config_uc.minio_access_key,
+        config_uc.minio_secret_key,
+        config_uc.region_name,
+    )
+
+    logger = setup_logger(config.log_dir / "discogs_raw_download.log")
+
+    logger.info(f"{config.data_dir}/raw/")
+
+    already_downloaded = retrieve_downloaded_dumps_s3(
+        bucket="discogs", prefix=f"{config.data_dir}/raw/", s3=s3
+    )
+    
+    
+    
+    logger.info(f"{already_downloaded = }")
+
     latest_discogs_dump_url_root = get_latest_dump_date(
         config.DISCOGS_DUMP_URL_ROOT,
         config.YEAR_LIMIT_PAST,
@@ -53,10 +64,23 @@ if __name__ == "__main__":
         TIMEOUT=config.TIMEOUT,
         logger=logger,
     )
+
     date_latest_dump = re.sub(".*_", "", latest_discogs_dump_url_root)
 
-    for suffix in config.DISC_SUFFIX_LIST:
-        download_dump(latest_discogs_dump_url_root, suffix, config)
+    logger.info(f"{date_latest_dump = }")
 
-    validate_downloads(str(config.raw_data_dir), date_latest_dump, logger)
+    for suffix in config.DISC_SUFFIX_LIST:
+        download_dump(latest_discogs_dump_url_root, suffix, config, logger, s3)
+
+    #validate_downloads(str(config.raw_data_dir), date_latest_dump, logger,s3)
+
+    validate_downloads_s3(
+        bucket="discogs",
+        prefix=f"{config.data_dir}/raw/",
+        date=date_latest_dump,
+        logger=logger,
+        s3=s3,
+        suffixes = config.DISC_SUFFIX_LIST
+    )
+    
     logger.info("All downloads completed and validated successfully!")
