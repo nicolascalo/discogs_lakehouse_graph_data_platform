@@ -3,7 +3,6 @@
 # Named Volumes
 # =========================
 volumes:
-  pgdata:
   uc-pgdata:
   neo4jdata:
   grafanadata:
@@ -32,8 +31,7 @@ services:
     ports:
       - "8081:8080"   # host 8081 → container 8080
     volumes:
-      - ./config/unitycatalog/etc/conf:/opt/unitycatalog/etc/conf
-      - ./data/unitycatalog:/opt/unitycatalog/etc/data
+      - ./config/unitycatalog/etc/conf:/home/unitycatalog/etc/conf
     networks:
       - discogs-net
     environment:
@@ -42,8 +40,39 @@ services:
       # These tell UC's S3 client to use MinIO
       UC_S3_ENDPOINT: http://minio:9000
       UC_S3_PATH_STYLE_ACCESS: "true"
+
+      UC_DB_HOST: uc-postgres
+      UC_DB_PORT: 5432
+      UC_DB_NAME: unitycatalog
+      UC_DB_USER: uc
+      UC_DB_PASSWORD: ucpassword
+      SPRING_DATASOURCE_URL: jdbc:postgresql://uc-postgres:5432/unitycatalog
+      SPRING_DATASOURCE_USERNAME: uc
+      SPRING_DATASOURCE_PASSWORD: ucpassword
+      SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
     depends_on:
-      - minio
+      uc-postgres:
+        condition: service_healthy
+
+
+  uc-postgres:
+    image: postgres:17
+    container_name: uc-postgres
+    environment:
+      POSTGRES_USER: uc
+      POSTGRES_PASSWORD: ucpassword
+      POSTGRES_DB: unitycatalog
+    volumes:
+      - ./data/unitycatalog-pg:/var/lib/postgresql/data
+    networks:
+      - discogs-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uc -d unitycatalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
 
   uc-ui:
     build:
@@ -74,6 +103,9 @@ services:
       - ./data/minio:/data
     networks:
       - discogs-net
+
+
+
 
   # =========================
   # Spark Standalone Cluster
@@ -135,7 +167,6 @@ services:
     networks:
       - discogs-net
     env_file: ".env"
-
 
 #
 #  # =========================
