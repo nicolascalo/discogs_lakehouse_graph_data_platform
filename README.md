@@ -84,7 +84,7 @@ Backfills are intentionally not required in the current design.
 Schema drift at this layer is handled via nested structure serialization
 to preserve merge stability.
 
-## Silver Layer
+## Silver Layer (In Progress)
 
 -   Enforced domain schema
 -   Normalized entities (Artists, Releases)
