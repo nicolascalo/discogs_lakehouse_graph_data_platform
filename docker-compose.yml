@@ -126,10 +126,10 @@ services:
       - "8888:8888"   # Jupyter Lab
     volumes:
       - ./debug:/opt/spark/work-dir
-      - ./jobs:/jobs
+      - ./app:/app
       - ./logs:/logs
       - ./data:/data
-      - ./metrics:/metrics
+      - ./metadata:/metadata
       - ./data_tests:/data_tests
       - ./config:/config
     networks:
@@ -158,10 +158,10 @@ services:
       
     volumes:
       - ./debug:/opt/spark/work-dir
-      - ./jobs:/jobs
+      - ./app:/app
       - ./logs:/logs
       - ./data:/data
-      - ./metrics:/metrics
+      - ./metadata:/metadata
       - ./data_tests:/data_tests
       - ./config:/config
     networks:

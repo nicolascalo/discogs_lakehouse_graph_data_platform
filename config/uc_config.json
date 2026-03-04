@@ -3,9 +3,10 @@
     "MINIO_ACCESS_KEY": "minio",
     "MINIO_SECRET_KEY": "minio123",
     "MINIO_BUCKET": "discogs",
-    "REGION_NAME":"us-east-1",
-    "SIGNATURE_VERSION":"s3v4",
-
+    "REGION_NAME": "us-east-1",
+    "SIGNATURE_VERSION": "s3v4",
+    "CATALOG_DATA": "data",
+    "CATALOG_TEST": "test",
     "UC_URL": "http://uc-server:8080/api/2.1/unity-catalog",
     "HEADERS": {
         "Authorization": "Bearer test-token",

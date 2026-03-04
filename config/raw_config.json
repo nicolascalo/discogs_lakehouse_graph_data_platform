@@ -1,14 +1,62 @@
 {
 "DISCOGS_DUMP_URL_ROOT" : "https://data.discogs.com/?download=data",
 "DISC_PREFIX" : "discogs_",
+
+"DUMP_TYPE_TO_PROCESS" : 
+{
+    "test":[
+
+],
+    "testmin":[
+    "labels",
+    "masters"
+],
+    "prod":[
+    "masters",
+    "labels",
+    "artists",
+    "releases"
+
+
+],
+    "dev":[
+    "artists",
+    "releases"
+
+]
+
+},
+
+
 "DISC_SUFFIX_LIST" : 
-[
+{
+    "test":[
+    "_CHECKSUM.txt",
+    "_labels.xml.gz"
+        
+
+],
+    "testmin":[
+    "_CHECKSUM.txt",
+    "_labels.xml.gz"
+],
+    "prod":[
     "_CHECKSUM.txt",
     "_masters.xml.gz",
     "_labels.xml.gz",
-    "_artists.xml.gz"
+    "_artists.xml.gz",
+    "_releases.xml.gz"
+
 
 ],
+    "dev":[
+    "_CHECKSUM.txt",
+    "_artists.xml.gz",
+    "_releases.xml.gz"
+
+]
+
+},
 "YEAR_LIMIT_PAST" : 2007,
 "PARALLEL_RANGES" : 4 ,
 "LOG_PROGRESS_EVERY_MB" : 10,

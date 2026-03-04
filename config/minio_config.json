@@ -1,0 +1,8 @@
+{
+    "MINIO_ENDPOINT": "http://minio:9000",
+    "MINIO_ACCESS_KEY": "minio",
+    "MINIO_SECRET_KEY": "minio123",
+    "MINIO_BUCKET": "discogs",
+    "REGION_NAME": "us-east-1",
+    "SIGNATURE_VERSION": "s3v4"
+}

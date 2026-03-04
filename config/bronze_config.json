@@ -1,7 +1,7 @@
 {
     "PRIMARY_KEYS": {
         "artists": "id",
-        "releases": "@id"
+        "releases": "_id"
     },
         "COLS_TO_HASH": {
         "artists": ["groups"],
