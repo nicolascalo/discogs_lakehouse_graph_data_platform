@@ -1,14 +1,11 @@
-FROM apache/spark:4.1.0-scala2.13-java21-python3-ubuntu
+FROM eclipse-temurin:17-jre-jammy
 
-ENV SPARK_VERSION=4.1.0
-ENV DELTA_SPARK_VERSION=4.1.0
-ENV UNITY_CATALOG_VERSION=0.4.0
+ENV SPARK_VERSION=4.0.1
+ENV DELTA_SPARK_VERSION=4.0.1
+ENV UNITY_CATALOG_VERSION=0.3.1
 ENV HADOOP_VERSION=3
 ENV SPARK_HOME=/opt/spark
 ENV PATH=$SPARK_HOME/bin:$PATH
-
-USER root
-
 
 # -----------------------------
 # System dependencies
@@ -23,6 +20,12 @@ RUN apt-get update && \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# -----------------------------
+# Download and extract Spark
+# -----------------------------
+RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-connect.tgz \
+    | tar -xz -C /opt && \
+    mv /opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-connect /opt/spark
 
 
 # Install Hadoop AWS + AWS SDK v2 for S3A
@@ -45,16 +48,11 @@ RUN mkdir -p $SPARK_HOME/jars && cd $SPARK_HOME/jars && \
     curl -fsSL -O https://repo1.maven.org/maven2/com/fasterxml/jackson/dataformat/jackson-dataformat-xml/2.15.0/jackson-dataformat-xml-2.15.0.jar
 
 # -----------------------------
-# Download Spark Pipelines JAR
-# -----------------------------
-RUN cd $SPARK_HOME/jars && \
-    curl -fsSL -O https://repo1.maven.org/maven2/org/apache/spark/spark-pipelines_2.13/${DELTA_SPARK_VERSION}/spark-pipelines_2.13-${DELTA_SPARK_VERSION}.jar
-
-# -----------------------------
 # Install Python packages
 # -----------------------------
 RUN pip3 install uv
 RUN uv pip install --system --no-cache-dir \
+    pyspark==${SPARK_VERSION} \
     delta-spark==${DELTA_SPARK_VERSION} \
     zstandard>=0.25.0 \
     pyarrow \
@@ -72,7 +70,6 @@ RUN uv pip install --system --no-cache-dir \
     httpx[http2] \
     neo4j \
     botocore
-
 
     
 # -----------------------------
