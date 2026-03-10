@@ -103,9 +103,14 @@ def cleanup_old_raw_files_s3(
                 to_delete.append({"Key": key})
 
                 if len(to_delete) == 1000:
-                    s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
+                    if to_delete:
+                    
+                        s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
                     to_delete = []
                     
-    s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
+    
+    
+    if to_delete:
+        s3.delete_objects(Bucket=bucket, Delete={"Objects": to_delete})
 
     logger.info("Cleanup completed.")

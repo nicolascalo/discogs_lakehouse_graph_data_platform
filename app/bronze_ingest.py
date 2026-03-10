@@ -4,31 +4,39 @@ from bronze_ingest.file_discovery import (
     get_latest_dump_date_s3,
     get_latest_dump_files_info_s3,
 )
-from unitycatalog.uc import uc_create_catalog, uc_list_tables, uc_create_schemas
-from download_raw.validate import validate_downloads_s3
+from unitycatalog.uc import (
+    uc_list_tables,
+)
+from helpers_spark.delta_metrics import (
+    export_delta_table_history_s3,
+    create_new_delta_history,
+)
 
+from helpers_spark.delta_tables import (
+    infer_columns_from_delta,
+)
+
+from download_raw.validate import validate_downloads_s3
 
 from settings import Settings
 import logging
 from pathlib import Path
 
-
 from logs.logging_config import setup_logger
-from helpers_spark.delta_metrics import (
-    export_delta_table_history_s3,
-    create_new_delta_history,
-)
 from helpers_spark.schemas import export_schemas_s3
 from helpers_spark.spark_session import create_spark_session
 from bronze_ingest.xml import read_xml_to_df
 from helpers_spark.hash import apply_hash
-from helpers_spark.delta_tables import (
-    merge_into_delta,
-    create_new_delta_table_s3_overwrite,
-    infer_columns_from_delta,
+from helpers_spark.spark_uc import (
+    merge_into_uc_delta,
+    uc_create_catalog,
+    uc_create_schemas,
+    uc_list_tables,
+    uc_register_table,
 )
+
+
 from helpers_spark.serialization import serialize_for_merge
-from unitycatalog.uc import uc_register_table
 
 import sys
 
@@ -40,6 +48,7 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
     config_bronze = settings.bronze
 
     dump_type = dump["dump_type"]
+    dump_date = dump["dump_date"]
 
     if dump_type not in config_bronze["PRIMARY_KEYS"]:
         return None
@@ -51,7 +60,6 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
     input_file_path = f"s3a://{storage.bucket}/{dump['file']}"
 
     logger.info(f"Processing {input_file_path}")
-
     logger.info(f"{config_bronze = }")
 
     HEADERS = settings.uc.headers
@@ -59,6 +67,7 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
     metrics_schema = "metrics"
     data_table_name = f"{dump_type}_data"  # data_table_name in UC
     metrics_table_name = f"{dump_type}_metrics"  # data_table_name in UC
+
     output_history_table = (
         f"s3a://{storage.bucket}/{catalog}/bronze/{metrics_table_name}"
     )
@@ -84,13 +93,13 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
 
         start = datetime.datetime.now()
         df = read_xml_to_df(spark, dump_type, input_file_path, logger=logger)
+        num_partitions = spark.sparkContext.defaultParallelism * 2
+        logger.info(f"Using {num_partitions} partitions to process {input_file_path}")
 
-        def sanitize_columns(df):
-            for c in df.columns:
-                df = df.withColumnRenamed(c, c.replace("@", "_"))
-            return df
+        df = df.repartition(num_partitions).cache()
 
-        df = sanitize_columns(df)
+        for c in df.columns:
+            df = df.withColumnRenamed(c, c.replace("@", "_"))
 
         df_hashed = apply_hash(
             df,
@@ -113,53 +122,53 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
 
         df_mergeable = serialize_for_merge(df_hashed, primary_key=primary_key)
 
-        output_dir = f"s3a://{storage.bucket}/{catalog}/bronze"
-        output_table_s3_path = output_dir + "/" + data_table_name
-
+        schema_data_table_name = f"{schema}.{data_table_name}"
+        full_table_output_path = (
+            f"s3a://{settings.project_name}/{catalog}/bronze/{data_table_name}"
+        )
         uc_table_list = uc_list_tables(catalog, schema, HEADERS, UC_URL, logger=logger)
 
         logger.info(f"{uc_table_list = }")
 
-        if data_table_name not in uc_table_list:
-            uc_create_schemas(
-                catalog,
-                schema_list=[schema],
-                HEADERS=HEADERS,
-                UC_URL=UC_URL,
-                logger=logger,
-            )
+        df_mergeable = df_mergeable.repartition(16, primary_key)
 
-            create_new_delta_table_s3_overwrite(
-                df_mergeable,
-                output_table_s3_path,
-                logger=logger,
-            )
-
-            create_new_delta_history(spark)
-
-        else:
-            merge_into_delta(
+        if data_table_name in uc_table_list:
+            merge_into_uc_delta(
                 spark,
                 df_mergeable,
-                output_table_s3_path,
+                full_table_output_path,
                 primary_key,
                 hash_col="root_hash",
                 logger=logger,
             )
 
+            new_table_flag = False
 
-        columns = infer_columns_from_delta(output_table_s3_path, spark)
+        else:
+            new_table_flag = True
 
-        uc_register_table(
-            catalog,
-            schema,
-            data_table_name,
-            output_dir,
-            columns,
-            HEADERS,
-            UC_URL,
-            logger,
-        )
+            df_mergeable.limit(0).write.format("delta").option(
+                "delta.enableChangeDataFeed", "true"
+            ).mode("overwrite").option("path", full_table_output_path).option(
+                "delta.autoOptimize.optimizeWrite", "true"
+            ).option("delta.autoOptimize.autoCompact", "true").save()
+
+            df_mergeable.write.format("delta").mode("append").save(
+                full_table_output_path
+            )
+            create_new_delta_history(spark)
+            columns = infer_columns_from_delta(full_table_output_path, spark)
+
+            uc_register_table(
+                catalog,
+                schema,
+                data_table_name,
+                full_table_output_path,
+                columns,
+                HEADERS,
+                UC_URL,
+                logger,
+            )
 
         export_schemas_s3(
             df_mergeable,
@@ -167,37 +176,6 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
             dump,
             logger=logger,
             metadata_dir=settings.metadata_dir,
-        )
-
-        input_data_table = f"s3a://{storage.bucket}/{catalog}/bronze/{data_table_name}"
-
-        uc_create_schemas(
-            catalog, schema_list=[schema], HEADERS=HEADERS, UC_URL=UC_URL, logger=logger
-        )
-
-        export_delta_table_history_s3(
-            spark=spark,
-            input_data_table=input_data_table,
-            output_history_table=output_history_table,
-            dump_type=dump_type,
-            dump_date=latest_dump_date_to_process,
-            input_layer="raw",
-            output_layer="bronze",
-            logger=logger,
-            LOG_DIR=settings.log_dir,
-        )
-
-        columns = infer_columns_from_delta(output_history_table, spark)
-
-        uc_register_table(
-            catalog,
-            schema,
-            metrics_table_name,
-            output_dir,
-            columns,
-            HEADERS,
-            UC_URL,
-            logger,
         )
 
         raw_data_s3_path = f"s3://{storage.bucket}/{catalog}/raw/data/"
@@ -222,12 +200,18 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
             },
         )
 
-        return {
-            "dump_type": dump_type,
-            "dump_date": latest_dump_date_to_process,
-            "status": "processed",
-            "duration": duration,
-        }
+        export_delta_table_history_s3(
+            spark=spark,
+            input_data_table=full_table_output_path,
+            output_history_table=output_history_table,
+            dump_type=dump_type,
+            dump_date=latest_dump_date_to_process,
+            input_layer="raw",
+            output_layer="bronze",
+            logger=logger,
+            LOG_DIR=settings.log_dir,
+            csv_file_name = f"{catalog}_bronze_{data_table_name}"
+        )
 
     except Exception:
         logger.exception(
@@ -239,20 +223,30 @@ def process_single_dump(spark, dump, settings, logger, catalog, s3, schema="raw"
 
 
 def main(spark, settings, bucket: str, logger, s3):
-    HEADERS = settings.uc.headers
-    UC_URL = settings.uc.url
 
     catalog = settings.project_name + "_" + settings.storage.env
     schema = "raw"
 
-    uc_create_catalog(catalog, HEADERS=HEADERS, UC_URL=UC_URL, logger=logger)
-
-    uc_create_schemas(
-        catalog, schema_list=["raw"], HEADERS=HEADERS, UC_URL=UC_URL, logger=logger
-    )
-
     if settings.storage.type == "minio":
         raw_s3_folder_path = "/".join([catalog, schema, "data"])
+        storage_root = f"s3a://{settings.project_name}/{catalog}/"
+
+        catalog_info = uc_create_catalog(
+            catalog=catalog,
+            HEADERS=settings.uc.headers,
+            UC_URL=settings.uc.url,
+            logger=logger,
+            managed_location=storage_root,
+            comment="Discogs test catalog",
+        )
+
+        uc_create_schemas(
+            catalog,
+            schema_list=["raw"],
+            HEADERS=settings.uc.headers,
+            UC_URL=settings.uc.url,
+            logger=logger,
+        )
 
         validate_downloads_s3(
             bucket=settings.project_name,
@@ -282,6 +276,8 @@ def main(spark, settings, bucket: str, logger, s3):
 if __name__ == "__main__":
     settings = Settings.load()
     storage = settings.storage
+    uc = settings.uc
+    catalog = settings.project_name + "_" + settings.storage.env
 
     try:
         s3 = storage.s3
@@ -291,6 +287,10 @@ if __name__ == "__main__":
             endpoint=storage.endpoint,
             access_key=storage.access_key,
             secret_key=storage.secret_key,
+            uc_uri=uc.url,
+            uc_token=uc.token,
+            bucket=settings.project_name,
+            catalog=catalog,
         )
 
         setup_logger(

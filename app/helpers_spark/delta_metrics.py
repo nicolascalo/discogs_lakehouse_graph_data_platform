@@ -128,17 +128,20 @@ def export_delta_table_history_s3(
     input_layer: str,
     output_layer:str,
     logger: logging.Logger,
-    LOG_DIR: Path
+    LOG_DIR: Path,
+    csv_file_name:str
 ) -> None:
     """
     Export the latest MERGE or WRITE operation from a Delta table history
     along with all available operationMetrics.
     """
-    csv_path = f"{LOG_DIR}/discogs_{output_layer}_{dump_type}_delta_history.csv"
+    
+    csv_path = f"{LOG_DIR}/{csv_file_name}_delta_history.csv"
     logger.info(f"Outputting metrics: {csv_path}")
 
     # Read full Delta history
     history = spark.sql(f"DESCRIBE HISTORY delta.`{input_data_table}`")
+    
 
     # Keep only MERGE or WRITE operations
     history = history.filter(F.col("operation").isin("MERGE", "WRITE"))
@@ -157,7 +160,8 @@ def export_delta_table_history_s3(
 
     # Add extra metadata columns
     latest_history = (
-        latest_history.withColumn("dump", F.lit(dump_date))
+        latest_history
+        .withColumn("dump", F.lit(dump_date))
         .withColumn("layer_output", F.lit(output_layer))
         .withColumn("table_output", F.lit(dump_type))
         .withColumn("layer_input", F.lit(input_layer))
