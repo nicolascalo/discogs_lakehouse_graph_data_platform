@@ -114,7 +114,14 @@ if __name__ == "__main__" or "get_ipython" in dir():
         app_name = "discogs-uc-init"
 
         spark = create_spark_session(
-            app_name, storage.endpoint, storage.access_key, storage.secret_key
+            app_name="uc-init",
+            endpoint=storage.endpoint,
+            access_key=storage.access_key,
+            secret_key=storage.secret_key,
+            uc_uri=uc.url,
+            uc_token=uc.token,
+            bucket=settings.project_name,
+            catalog=None,
         )
         
         

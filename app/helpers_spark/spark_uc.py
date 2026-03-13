@@ -1,4 +1,3 @@
-
 import requests
 
 from delta.tables import DeltaTable
@@ -9,17 +8,24 @@ import logging
 def merge_into_uc_delta(
     spark: SparkSession,
     df: DataFrame,
-    table_name: str,   # catalog.schema.table
+    table_name: str,  # catalog.schema.table
     primary_key: str,
     hash_col: str | None,
     logger: logging.Logger,
+    secondary_key: str | None = None,
 ) -> None:
 
-    logger.info(
-        f"Merging into {table_name} based on {hash_col} and {primary_key}"
-    )
-
+    if secondary_key:
+        logger.info(f"Merging into {table_name} based on {hash_col}, {primary_key} and {secondary_key}")
+        
+        merge_logic= f"(t.`{primary_key}` = s.`{primary_key}` ) AND (t.`{secondary_key}` = s.`{secondary_key}`)"
+        
+    else:
+        logger.info(f"Merging into {table_name} based on {hash_col} and {primary_key}")
+        merge_logic= f"t.`{primary_key}` = s.`{primary_key}`"
+        
     target = DeltaTable.forPath(spark, table_name)
+
 
 
 
@@ -28,7 +34,7 @@ def merge_into_uc_delta(
             target.alias("t")
             .merge(
                 df.alias("s"),
-                f"t.`{primary_key}` = s.`{primary_key}`",
+                merge_logic,
             )
             .whenMatchedUpdateAll(condition=f"t.{hash_col} <> s.{hash_col}")
             .whenNotMatchedInsertAll()
@@ -40,7 +46,7 @@ def merge_into_uc_delta(
             target.alias("t")
             .merge(
                 df.alias("s"),
-                f"t.`{primary_key}` = s.`{primary_key}`",
+                merge_logic,
             )
             .whenMatchedUpdateAll()
             .whenNotMatchedInsertAll()
@@ -48,10 +54,7 @@ def merge_into_uc_delta(
             .execute()
         )
 
-    
-    
-    
-    
+
 def uc_create_table_if_not_exists(
     spark,
     catalog,
@@ -68,13 +71,11 @@ def uc_create_table_if_not_exists(
     USING DELTA
     LOCATION '{location}'
     """)
-    
-    
-    
-    
-    
-def uc_create_catalog(catalog, HEADERS, UC_URL, logger, comment="", managed_location = ""):
 
+
+def uc_create_catalog(
+    catalog, HEADERS, UC_URL, logger, comment="", managed_location=""
+):
 
     payload = {"name": catalog}
     if managed_location:
@@ -82,8 +83,8 @@ def uc_create_catalog(catalog, HEADERS, UC_URL, logger, comment="", managed_loca
     if comment:
         payload["comment"] = comment
 
-    r = requests.post(f"{UC_URL}/catalogs", headers=HEADERS, json=payload)    
-    
+    r = requests.post(f"{UC_URL}/catalogs", headers=HEADERS, json=payload)
+
     if r.status_code in (200, 201):
         logger.info(f"Created catalog: {catalog}")
     elif r.status_code == 409:  # Conflict → already exists
@@ -95,7 +96,9 @@ def uc_create_catalog(catalog, HEADERS, UC_URL, logger, comment="", managed_loca
     return r.json()
 
 
-def uc_create_schemas(catalog, schema_list:list[str], HEADERS, UC_URL, logger, comment=""):
+def uc_create_schemas(
+    catalog, schema_list: list[str], HEADERS, UC_URL, logger, comment=""
+):
     response_list = []
     for schema in schema_list:
         r = requests.post(
@@ -109,9 +112,10 @@ def uc_create_schemas(catalog, schema_list:list[str], HEADERS, UC_URL, logger, c
             pass
         else:
             logger.error(f"Schema {catalog}.{schema}: {r.json().get('message')}")
-            
+
         response_list.append(r.json())
     return response_list
+
 
 def uc_list_tables(catalog, schema, HEADERS, UC_URL, logger):
     """List all tables in a UC schema."""

@@ -3,6 +3,57 @@ from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
 from pyspark.sql.types import StructType, ArrayType
 
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
+
+
+def clean_nested_columns(df):
+    """
+    Recursively remove '@' from all column names in a DataFrame schema.
+    """
+
+    def clean_struct(schema, prefix=None):
+        cols = []
+
+        for field in schema.fields:
+
+            old_name = field.name
+            new_name = old_name.replace("@", "_")
+
+            col_path = f"{prefix}.{old_name}" if prefix else old_name
+
+            dtype = field.dataType
+
+            if isinstance(dtype, T.StructType):
+
+                nested = clean_struct(dtype, col_path)
+
+                cols.append(
+                    F.struct(*nested).alias(new_name)
+                )
+
+            elif isinstance(dtype, T.ArrayType) and isinstance(dtype.elementType, T.StructType):
+
+                nested = clean_struct(dtype.elementType, None)
+
+                cols.append(
+                    F.transform(
+                        F.col(col_path),
+                        lambda x: F.struct(
+                            *[
+                                x[f.name].alias(f.name.replace("@", "_"))
+                                for f in dtype.elementType.fields
+                            ]
+                        )
+                    ).alias(new_name)
+                )
+
+            else:
+                cols.append(F.col(col_path).alias(new_name))
+
+        return cols
+
+    return df.select(*clean_struct(df.schema))
 
 def serialize_for_merge(df, primary_key: str) -> DataFrame:
     """

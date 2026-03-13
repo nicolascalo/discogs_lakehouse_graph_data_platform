@@ -1,7 +1,7 @@
 import os
 import logging
 from pathlib import Path
-
+import json
 
 def export_schemas(
     df, dump_type: str, metadata_dir: Path, dump_date: str, logger: logging.Logger
@@ -27,28 +27,35 @@ def export_schemas(
     return None
 
 
-def export_schemas_s3(
-    df, catalog, dump , metadata_dir: str, logger: logging.Logger
+def export_schemas_s3_and_head(
+    df, catalog, dump_description , metadata_dir: str, logger: logging.Logger, n:int = 500
 ) -> None:
 
 
 
 
-    logger.info(f"{dump['file']} -> Exporting schemas")
+    logger.info(f"{dump_description} -> Exporting schemas")
 
     xml_schema_tree = df.schema.treeString()
-    xml_schema_json = df.schema.json()
+    xml_schema_json = json.loads(df.schema.json())
 
     schema_path = os.path.join(
-        metadata_dir, f"{catalog}_{dump['dump_type']}_schema_dump_{dump['dump_date']}_tree.txt"
+        metadata_dir, f"{catalog}_{dump_description}_schema_tree.txt"
     )
 
     with open(schema_path, "w") as f:
         f.write(xml_schema_tree)
 
-    schema_path = os.path.join(metadata_dir, f"{catalog}_{dump['dump_type']}_schema_dump_{dump['dump_date']}.json")
+    schema_path = os.path.join(metadata_dir, f"{catalog}_{dump_description}_schema.json")
 
     with open(schema_path, "w") as f:
-        f.write(xml_schema_json)
+         json.dump(xml_schema_json, f, indent=4, ensure_ascii=False)
+         
+         
+    head_path = os.path.join(metadata_dir, f"{catalog}_{dump_description}_head{n}.csv")
+    
+    df.limit(n).toPandas().to_csv(head_path, index=False)
+    logger.info(f"Head({n}) of exported to {head_path}")
+
 
     return None

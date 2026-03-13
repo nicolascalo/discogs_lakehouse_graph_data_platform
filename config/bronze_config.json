@@ -6,6 +6,10 @@
         "COLS_TO_HASH": {
         "artists": ["groups"],
         "releases": ["artists","extraartists","tracklist"]
+    },
+        "COLS_TO_KEEP": {
+        "artists": ["id","name","groups"],
+        "releases": ["_id", "artists","extraartists","tracklist","genres","master_id","released","styles" , "title"]
     }
 
 }

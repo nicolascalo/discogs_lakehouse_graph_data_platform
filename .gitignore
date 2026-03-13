@@ -9,6 +9,7 @@ data_tests/gold
 data_tests/scripts_data_sample_prep
 logs/
 metrics/
+metadata/
 
 
 # Byte-compiled / optimized / DLL files

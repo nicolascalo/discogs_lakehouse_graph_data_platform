@@ -16,13 +16,16 @@ mc mb --ignore-existing local/discogs/discogs_test
 mc mb --ignore-existing local/discogs/discogs_test/raw
 mc mb --ignore-existing local/discogs/discogs_test/raw/data
 
-mc cp ./data_test_files/discogs_test/raw/data/discogs_20251101_* local/discogs/discogs_test/raw/data/
-mc cp ./data_test_files/discogs_test/raw/data_archive/discogs_20251101_* local/discogs/discogs_test/raw/data/
-
-docker exec spark-master python3 /app/bronze_ingest.py
-docker exec spark-master python3 /app/bronze_ingest.py
-
 mc cp ./data_test_files/discogs_test/raw/data/discogs_20251201_* local/discogs/discogs_test/raw/data/
-mc cp ./data_test_files/discogs_test/raw/data_archive/discogs_20251201_* local/discogs/discogs_test/raw/data/
 
 docker exec spark-master python3 /app/bronze_ingest.py
+docker exec spark-master python3 /app/bronze_ingest.py
+
+mc cp ./data_test_files/discogs_test/raw/data/discogs_20260101_* local/discogs/discogs_test/raw/data/
+
+docker exec spark-master python3 /app/bronze_ingest.py
+
+mc cp ./data_test_files/discogs_test/raw/data/discogs_20260201_* local/discogs/discogs_test/raw/data/
+
+docker exec spark-master python3 /app/bronze_ingest.py
+#docker exec spark-master python3 /app/silver_subtables.py

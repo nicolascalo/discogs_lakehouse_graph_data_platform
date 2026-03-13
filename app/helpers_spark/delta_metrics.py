@@ -129,7 +129,10 @@ def export_delta_table_history_s3(
     output_layer:str,
     logger: logging.Logger,
     LOG_DIR: Path,
-    csv_file_name:str
+    csv_file_name:str,
+    settings,
+    catalog,
+    last_input_version_processed:str|None
 ) -> None:
     """
     Export the latest MERGE or WRITE operation from a Delta table history
@@ -137,7 +140,7 @@ def export_delta_table_history_s3(
     """
     
     csv_path = f"{LOG_DIR}/{csv_file_name}_delta_history.csv"
-    logger.info(f"Outputting metrics: {csv_path}")
+    logger.info(f"Outputting metrics for {input_data_table} in {csv_path}")
 
     # Read full Delta history
     history = spark.sql(f"DESCRIBE HISTORY delta.`{input_data_table}`")
@@ -146,7 +149,7 @@ def export_delta_table_history_s3(
     # Keep only MERGE or WRITE operations
     history = history.filter(F.col("operation").isin("MERGE", "WRITE"))
 
-    if history.count() == 0:
+    if history.limit(1).count() == 0:
         logger.warning(f"No MERGE or WRITE operations found for {input_data_table}")
         return None
 
@@ -166,11 +169,18 @@ def export_delta_table_history_s3(
         .withColumn("table_output", F.lit(dump_type))
         .withColumn("layer_input", F.lit(input_layer))
         .withColumn("table_input", F.lit(dump_type))
+        .withColumn("catalog", F.lit(catalog))
+        .withColumn("project_name", F.lit(settings.project_name))
+        .withColumn("env", F.lit(settings.env))
+        .withColumn("last_input_version_processed", F.lit(last_input_version_processed))
     )
-
+    latest_history = latest_history.withColumnRenamed(
+    "version",
+    "source_table_version"
+)
     # Select all relevant columns including metrics
     select_cols = [
-        "version",
+        "source_table_version",
         "timestamp",
         "operation",
         "dump",
