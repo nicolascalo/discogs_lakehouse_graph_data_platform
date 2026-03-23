@@ -1,5 +1,5 @@
-from bronze_ingest.archive import cleanup_old_raw_files_s3
-from bronze_ingest.file_discovery import (
+from raw_to_bronze.archive import cleanup_old_raw_files_s3
+from raw_to_bronze.file_discovery import (
     get_s3_folder_contents,
     get_latest_dump_date_s3,
     get_latest_dump_files_info_s3,
@@ -25,7 +25,7 @@ from pathlib import Path
 from logs.logging_config import setup_logger
 from helpers_spark.schemas import export_schemas_s3_and_head
 from helpers_spark.spark_session import create_spark_session
-from bronze_ingest.xml import read_xml_to_df
+from raw_to_bronze.xml import read_xml_to_df
 from helpers_spark.hash import apply_hash
 from helpers_spark.spark_uc import (
     merge_into_uc_delta,
@@ -34,11 +34,8 @@ from helpers_spark.spark_uc import (
     uc_list_tables,
     uc_register_table,
 )
-from pyspark.sql import DataFrame
 
-import pandas as pd
-import os
-from helpers_spark.serialization import serialize_for_merge, clean_nested_columns
+from helpers_spark.serialization import clean_nested_columns
 
 import sys
 
@@ -68,7 +65,9 @@ def process_single_dump(
 
     HEADERS = settings.uc.headers
     UC_URL = settings.uc.url
-    output_layer_data_table_name = f"{dump_type}_data"  # output_layer_data_table_name in UC
+    output_layer_data_table_name = (
+        f"{dump_type}_data"  # output_layer_data_table_name in UC
+    )
     metrics_table_name = f"{dump_type}_metrics"  # output_layer_data_table_name in UC
 
     output_layer_history_deltatable_s3_path = (
@@ -101,36 +100,29 @@ def process_single_dump(
             f"Using {num_partitions} partitions to process {input_file_s3_path}"
         )
 
-
         df = clean_nested_columns(df)
-        
-        
+
         export_schemas_s3_and_head(
             df,
             catalog,
             f"bronze_{dump_type}_raw",
             logger=logger,
             metadata_dir=settings.metadata_dir,
-            n = 500
+            n=1000,
         )
 
-        
         df = df.select(*config_bronze["COLS_TO_KEEP"][dump_type])
-        
-        
+
         export_schemas_s3_and_head(
             df,
             catalog,
             f"bronze_{dump_type}_filtered",
             logger=logger,
             metadata_dir=settings.metadata_dir,
-            n = 500
+            n=1000,
         )
 
-        
-        
         df = df.repartition(num_partitions).cache()
-
 
         df_hashed = apply_hash(
             df,
@@ -153,9 +145,7 @@ def process_single_dump(
 
         df_mergeable = df_hashed
 
-        output_layer_data_deltatable_s3_path = (
-            f"s3a://{settings.project_name}/{catalog}/{output_layer}/{output_layer_data_table_name}"
-        )
+        output_layer_data_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{output_layer}/{output_layer_data_table_name}"
         uc_table_list = uc_list_tables(
             catalog, output_layer, HEADERS, UC_URL, logger=logger
         )
@@ -164,10 +154,17 @@ def process_single_dump(
 
         df_mergeable = df_mergeable.repartition(16, primary_key)
 
+        export_schemas_s3_and_head(
+            df_mergeable,
+            catalog,
+            f"bronze_{dump_type}_mergeable_hashed",
+            logger=logger,
+            metadata_dir=settings.metadata_dir,
+            n=1000,
+        )
+
+
         if output_layer_data_table_name in uc_table_list:
-            
-            
-            
             merge_into_uc_delta(
                 spark,
                 df_mergeable,
@@ -194,8 +191,7 @@ def process_single_dump(
                 output_layer_data_deltatable_s3_path
             )
             create_new_delta_history(spark)
-            
-            
+
             columns = infer_columns_from_delta(
                 output_layer_data_deltatable_s3_path, spark
             )
@@ -211,9 +207,6 @@ def process_single_dump(
                 logger,
             )
 
-
-
-        
         input_data_s3_path = f"s3://{storage.bucket}/{catalog}/{input_layer}/data/"
         input_data_archive_s3_path = (
             f"s3://{storage.bucket}/{catalog}/{input_layer}/data_archive/"
@@ -249,9 +242,9 @@ def process_single_dump(
             logger=logger,
             LOG_DIR=settings.log_dir,
             csv_file_name=f"{catalog}_{output_layer}_{output_layer_data_table_name}",
-            settings = settings,
-            catalog = catalog,
-            last_input_version_processed = None
+            settings=settings,
+            catalog=catalog,
+            last_input_version_processed=None,
         )
 
         columns = infer_columns_from_delta(
@@ -278,7 +271,7 @@ def process_single_dump(
         raise
 
 
-def main(spark, settings,  logger, s3, input_layer, output_layer):
+def main(spark, settings, logger, s3, input_layer, output_layer):
 
     catalog = settings.project_name + "_" + settings.storage.env
 

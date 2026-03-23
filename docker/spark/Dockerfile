@@ -71,7 +71,10 @@ RUN uv pip install --system --no-cache-dir \
     httpx \
     httpx[http2] \
     neo4j \
-    botocore
+    botocore \
+    beautifulsoup4 \
+    cloudscraper
+
 
 
     

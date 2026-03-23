@@ -1,118 +1,35 @@
 {
+    "discogs_creditlist_url": "https://www.discogs.com/help/creditslist",
     "artists": {
         "SOURCE_PRIMARY_KEY": "artist_id",
-        "EXPLODE_SCHEMAS": [
-            {
-                "field": "groups",
-                "schema": {
-                    "type": "struct",
-                    "fields": [
-                        {
-                            "name": "name",
-                            "type": {
-                                "type": "array",
-                                "elementType": {
-                                    "type": "struct",
-                                    "fields": [
-                                        {
-                                            "name": "_id",
-                                            "type": "long",
-                                            "nullable": "True",
-                                            "metadata": {}
-                                        },
-                                        {
-                                            "name": "_text",
-                                            "type": "string",
-                                            "nullable": "True",
-                                            "metadata": {}
-                                        }
-                                    ]
-                                },
-                                "containsNull": "True"
-                            },
-                            "nullable": "True",
-                            "metadata": {}
-                        }
-                    ]
-                }
-            }
-        ],
         "SUBTABLES": {
-            "create_artistsGroups_table": {
+            "create_artistsGroups_table": {},
+            "create_artistsGroupsComplete_table": {},
+            "create_groups_table": {},
+            "create_artists_table": {}
+        }
+    },
+    "releases": {
+        "SOURCE_PRIMARY_KEY": "release_id",
+        "SUBTABLES": {
+            "create_releaseStyles_table": {},
+            "create_releaseGenres_table": {},
+            "create_release_table": {},
+            "create_releaseArtists_table": {},
+            "create_releaseExtraartists_table": {},
+            "create_releaseTracks_table": {
                 "TABLE_DEPENDENCIES": [
-                    "groups"
+                    "tracklist"
                 ],
-                "TARGET_PRIMARY_KEY": "artist_id",
+                "TARGET_PRIMARY_KEY": "release_id",
                 "TARGET_SECONDARY_KEYS": [
-                    "group_id"
+                    "track_position"
                 ]
             },
-            "create_artistsGroupsComplete_table": {
-                "TABLE_DEPENDENCIES": [
-                    "groups"
-                ],
-                "TARGET_PRIMARY_KEY": "artist_id",
-                "TARGET_SECONDARY_KEYS": [
-                    "group_id"
-                ]
-            },
-            "create_groups_table": {
-                "TABLE_DEPENDENCIES": [
-                    "groups"
-                ],
-                "TARGET_PRIMARY_KEY": "group_id",
-                "TARGET_SECONDARY_KEYS": []
-            },
-            "create_artists_table": {
-                "TABLE_DEPENDENCIES": [],
-                "TARGET_PRIMARY_KEY": "artist_id",
-                "TARGET_SECONDARY_KEYS": []
-            }
-        },
-        "releases": {
-            "SOURCE_PRIMARY_KEY": "release_id",
-            "SUBTABLES": {
-                "create_releaseArtists_table": {
-                    "TABLE_DEPENDENCIES": [
-                        "artists"
-                    ],
-                    "TARGET_PRIMARY_KEY": "artist_id",
-                    "TARGET_SECONDARY_KEYS": []
-                },
-                "create_releaseExtraartists_table": {
-                    "TABLE_DEPENDENCIES": [
-                        "extraartists"
-                    ],
-                    "TARGET_PRIMARY_KEY": "release_id",
-                    "TARGET_SECONDARY_KEYS": [
-                        "role",
-                        "track_position",
-                        "artist_id"
-                    ]
-                },
-                "create_releaseTracksartists_table": {
-                    "TABLE_DEPENDENCIES": [
-                        "tracklist"
-                    ],
-                    "TARGET_PRIMARY_KEY": "release_id",
-                    "TARGET_SECONDARY_KEYS": [
-                        "role",
-                        "track_position",
-                        "artist_id"
-                    ]
-                },
-                "create_releaseTracksextraartists_table": {
-                    "TABLE_DEPENDENCIES": [
-                        "tracklist"
-                    ],
-                    "TARGET_PRIMARY_KEY": "release_id",
-                    "TARGET_SECONDARY_KEYS": [
-                        "role",
-                        "track_position",
-                        "artist_id"
-                    ]
-                }
-            }
+            "create_releaseTracksArtists_table": {},
+            "create_releaseTracksSubtracksArtists_table": {},
+            "create_releaseTracksSubtracksExtraartists_table": {},
+            "create_releaseTracksExtraartists_table": {}
         }
     }
 }

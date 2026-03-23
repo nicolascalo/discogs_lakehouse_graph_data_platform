@@ -5,7 +5,7 @@
     },
         "COLS_TO_HASH": {
         "artists": ["groups"],
-        "releases": ["artists","extraartists","tracklist"]
+        "releases": ["extraartists","tracklist"]
     },
         "COLS_TO_KEEP": {
         "artists": ["id","name","groups"],

@@ -12,24 +12,44 @@ def merge_into_uc_delta(
     primary_key: str,
     hash_col: str | None,
     logger: logging.Logger,
-    secondary_key: str | None = None,
+    secondary_keys: list[str] | None = None,
 ) -> None:
 
-    if secondary_key:
-        logger.info(f"Merging into {table_name} based on {hash_col}, {primary_key} and {secondary_key}")
+    if secondary_keys:
+        logger.info(f"Merging into {table_name} based on {hash_col}, {primary_key} and {secondary_keys}")
         
-        merge_logic= f"(t.`{primary_key}` = s.`{primary_key}` ) AND (t.`{secondary_key}` = s.`{secondary_key}`)"
+        if len(secondary_keys) == 1:
+            
+            secondary_key = secondary_keys[0]
+            merge_logic= f"(t.`{primary_key}` = s.`{primary_key}` ) AND (t.`{secondary_key}` = s.`{secondary_key}` ) "
+        
+        else:
+            merge_logic_secondary = []
+            
+            for key in secondary_keys:
+                merge_logic_secondary.append(f"(t.{key} <> s.{key})")
+            
+            merge_logic_secondary = " AND ".join(merge_logic_secondary)
+
+        
+        
+            merge_logic= f"(t.`{primary_key}` = s.`{primary_key}` ) AND {merge_logic_secondary}"
         
     else:
         logger.info(f"Merging into {table_name} based on {hash_col} and {primary_key}")
         merge_logic= f"t.`{primary_key}` = s.`{primary_key}`"
         
+    logger.info(f"{merge_logic = }")
     target = DeltaTable.forPath(spark, table_name)
 
-
+    spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
 
 
     if hash_col:
+        
+        logger.info(f"{hash_col = }")
+        
+        
         (
             target.alias("t")
             .merge(

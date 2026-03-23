@@ -28,7 +28,7 @@ def export_schemas(
 
 
 def export_schemas_s3_and_head(
-    df, catalog, dump_description , metadata_dir: str, logger: logging.Logger, n:int = 500
+    df, catalog, dump_description , metadata_dir: str, logger: logging.Logger, n:int|None = 1000
 ) -> None:
 
 
@@ -54,7 +54,12 @@ def export_schemas_s3_and_head(
          
     head_path = os.path.join(metadata_dir, f"{catalog}_{dump_description}_head{n}.csv")
     
-    df.limit(n).toPandas().to_csv(head_path, index=False)
+    if n:
+    
+        df.limit(n).coalesce(1).write.mode("overwrite").option("escapeQuotes", False).option("header", True).option("extension","tsv").option("sep","\t").csv(head_path)
+        
+    else:
+        df.coalesce(1).write.mode("overwrite").option("escapeQuotes", False).option("header", True).option("extension","tsv").option("sep","\t").csv(head_path)
     logger.info(f"Head({n}) of exported to {head_path}")
 
 

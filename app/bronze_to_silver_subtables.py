@@ -10,8 +10,8 @@ from helpers_spark.delta_tables import (
     infer_columns_from_delta,
 )
 
-import silver_subtables.artists as silver_artists
-import silver_subtables.helpers as silver_helpers
+import bronze_to_silver_subtables.helpers as silver_helpers
+from pyspark.sql.window import Window
 
 from inspect import getmembers, isfunction
 from settings import Settings
@@ -30,16 +30,91 @@ from helpers_spark.spark_uc import (
     uc_register_table,
 )
 from pyspark.sql import functions as F
-
-
+import importlib
+import os
 from helpers_spark.serialization import serialize_for_merge
 
 import sys
 
 import datetime
 
+import cloudscraper
+import pandas as pd
+from bs4 import BeautifulSoup
 
-def process_bronze(
+
+def create_discogsCreditlist(spark, settings, logger, catalog, output_layer):
+
+    output_layer_data_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{output_layer}/{'rolesCategoriesSubcategories'}"
+    scraper = cloudscraper.create_scraper()
+    response = scraper.get("https://www.discogs.com/help/creditslist")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.select_one("table.table_block")
+
+    # headers
+    headers = [th.get_text(strip=True) for th in table.select("thead th")]
+
+    # rows
+    rows = []
+    for tr in table.select("tr.odd, tr.even"):
+        cols = [td.get_text(strip=True) for td in tr.find_all("td")]
+        rows.append(cols)
+
+    df = pd.DataFrame(rows, columns=headers)
+    df = df.drop(["Notes", "Indexed?"], axis=1)
+    df = df.rename(
+        columns={
+            "Credit": "role",
+            "Heading": "role_category",
+            "Subheading": "role_subcategory",
+        }
+    )
+
+    logger.info(f"Creating new delta table {output_layer_data_deltatable_s3_path}")
+
+    new_table_flag = True
+
+    df = spark.createDataFrame(df)
+
+    df.limit(0).write.format("delta").option("delta.enableChangeDataFeed", "true").mode(
+        "overwrite"
+    ).option("path", output_layer_data_deltatable_s3_path).option(
+        "delta.autoOptimize.optimizeWrite", "true"
+    ).option("delta.autoOptimize.autoCompact", "true").save()
+
+    df.write.format("delta").mode("append").save(output_layer_data_deltatable_s3_path)
+
+    create_new_delta_history(spark)
+    columns = infer_columns_from_delta(output_layer_data_deltatable_s3_path, spark)
+    HEADERS = settings.uc.headers
+    UC_URL = settings.uc.url
+
+    output_layer_data_table_name = "rolesCategoriesSubcategories_data"
+    uc_register_table(
+        catalog,
+        output_layer,
+        output_layer_data_table_name,
+        output_layer_data_deltatable_s3_path,
+        columns,
+        HEADERS,
+        UC_URL,
+        logger,
+    )
+    
+    metadata_dir=str(settings.metadata_dir)
+    logger.info(f"{metadata_dir = }")
+    
+    head_path = Path(f"{metadata_dir}/{catalog}_rolesCategoriesSubcategories_data.csv")
+    logger.info(f"{head_path = }")
+    
+    df.toPandas().to_csv(head_path, index=False)
+    
+
+    return df
+
+
+def bronze_to_silver_subtables(
     spark, input_table, settings, logger, catalog, s3, input_layer, output_layer
 ):
 
@@ -62,11 +137,6 @@ def process_bronze(
     )
 
     input_layer_history_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{input_layer}/{metrics_table_name_input}"
-
-    metrics_table_name_output = (
-        f"{input_table}_metrics"  # output_layer_data_table_name in UC
-    )
-    output_layer_history_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{output_layer}/{metrics_table_name_output}"
 
     input_layer_data_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{input_layer}/{input_layer_data_table_name}"
 
@@ -124,56 +194,45 @@ def process_bronze(
 
     logger.info(f"{uc_table_list = }")
 
+    df_delete = df.filter(F.col("_change_type") == "delete")
 
+    df_upsert = df.filter(F.col("_change_type").isin("insert", "update_postimage"))
 
+    df = df_upsert.unionByName(df_delete).cache()
 
-    for explode_schema in config_silver[input_table].get("EXPLODE_SCHEMAS", None) :
-        
-    
-        df = df.withColumn(f'{explode_schema["field"]}_struct', F.from_json(explode_schema["field"], explode_schema["schema"]))
-        
-        df_exploded = silver_helpers.explode_field(df, explode_schema["field"]).cache()
-        
-        
-    df.count()
-    
-    
-    
-    
+    nb_records_to_update = df.count()
+
+    logger.info(f"{nb_records_to_update = }")
+
     last_input_version_processed = df.agg(F.max("_commit_version")).collect()[0][0]
 
-    for artist_function in getmembers(silver_artists, isfunction):
-        function_name = artist_function[0]
-        function_object = artist_function[1]
+    module = importlib.import_module(
+        f"bronze_to_silver_subtables.{input_table}", package=None
+    )
+
+    for function in getmembers(module, isfunction):
+        function_name = function[0]
+        function_object = function[1]
 
         logger.info(f"{function_name = }")
 
-        if "create_" not in function_name:
+        if not function_name.startswith("create_"):
             logger.info("Not a function to create tables: Skipping")
             continue
 
-        dependencies = config_silver[input_table]["SUBTABLES"][function_name].get(
-            "TABLE_DEPENDENCIES", []
-        )
+        df_local = df
+        df_mergeable_config = function_object(df_local)
+        logger.info(f"{df_mergeable_config = }")
+        output_layer_data_table_name = f"{df_mergeable_config['TABLE_TARGET']}_data"
+        metrics_table_name_output = f"{df_mergeable_config['TABLE_TARGET']}_metrics"
 
-        logger.info(f"{dependencies = }")
-
-        if "groups" in dependencies:
-            hash_col = "groups_hash"
-
-            df_local = df_exploded
-        else:
-            hash_col = None
-            df_local = df
-
-        output_layer_data_table_name = (
-            function_name.replace("create_", "").replace("_table", "") + "_data"
-        )
         logger.info(f"{output_layer_data_table_name = }")
 
+        output_layer_history_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{output_layer}/{metrics_table_name_output}"
         output_layer_metrics_table_name = (
-            function_name.replace("create_", "").replace("_table", "") + "_metrics"
+            f"{df_mergeable_config['TABLE_TARGET']}_metrics"
         )
+
         logger.info(f"{output_layer_metrics_table_name = }")
 
         if output_layer_metrics_table_name in uc_table_list:
@@ -210,20 +269,19 @@ def process_bronze(
 
             start = datetime.datetime.now()
 
-            df_mergeable = function_object(df_local)
+            df_mergeable = df_mergeable_config.get("df", None)
 
             output_layer_data_deltatable_s3_path = f"s3a://{settings.project_name}/{catalog}/{output_layer}/{output_layer_data_table_name}"
 
             logger.info(f"{output_layer_data_deltatable_s3_path = }")
 
-            target_secondary_key = config_silver[input_table]["SUBTABLES"][
-                function_name
-            ].get("TARGET_SECONDARY_KEY", None)
-            target_primary_key = config_silver[input_table]["SUBTABLES"][
-                function_name
-            ].get("TARGET_PRIMARY_KEY", None)
+            target_secondary_keys = df_mergeable_config.get(
+                "TARGET_SECONDARY_KEYS", None
+            )
+            target_primary_key = df_mergeable_config.get("TARGET_PRIMARY_KEY", None)
+
             logger.info(f"{target_primary_key = }")
-            logger.info(f"{target_secondary_key = }")
+            logger.info(f"{target_secondary_keys = }")
             logger.info(f"{df_mergeable.columns = }")
 
             df_mergeable = df_mergeable.repartition(
@@ -233,14 +291,63 @@ def process_bronze(
             if output_layer_data_table_name in uc_table_list:
                 logger.info(f"merge_into_uc_delta")
 
+                cols = [target_primary_key, *target_secondary_keys]
+                if cols:
+                    logger.info(f"{cols = }")
+
+                    duplicates = (
+                        df_mergeable.groupBy(cols).count().filter(F.col("count") > 1)
+                    )
+                    if duplicates.count() > 0:
+                        window = Window.partitionBy(*cols).orderBy(F.col("root_hash"))
+
+                        df_mergeable = (
+                            df_mergeable.withColumn("rn", F.row_number().over(window))
+                            .filter("rn = 1")
+                            .drop("rn")
+                        )
+
+                        duplicates = (
+                            df_mergeable.groupBy(cols)
+                            .count()
+                            .filter(F.col("count") > 1)
+                        )
+                        if duplicates.count() > 0:
+                            logger.info(f"duplicates.show(truncate=False)")
+                            duplicates.show(truncate=False)
+                            logger.info(f"df_mergeable.show(truncate=False)")
+                            df_mergeable.show(truncate=False)
+                            logger.info(f"df_mergeable.distinct().show(truncate=False)")
+                            df_mergeable.distinct().show(truncate=False)
+                            problem_keys = duplicates.select(cols)
+                            logger.info(f"join")
+                            df_mergeable.join(
+                                problem_keys, on=cols, how="inner"
+                            ).orderBy(cols).show(truncate=False)
+
+                            raise Exception(
+                                "Duplicate keys detected in source before merge"
+                            )
+
+                dependencies = df_mergeable_config.get("TABLE_DEPENDENCIES", None)
+
+                logger.info(f"{dependencies = }")
+
+                if dependencies:
+                    hash_col = f"{dependencies}_hash"
+                else:
+                    hash_col = None
+
+                df_mergeable = df_mergeable.drop("root_hash")
+
                 merge_into_uc_delta(
                     spark,
                     df_mergeable,
                     output_layer_data_deltatable_s3_path,
                     target_primary_key,
-                    hash_col=hash_col,
+                    hash_col=None,
                     logger=logger,
-                    secondary_key=target_secondary_key,
+                    secondary_keys=target_secondary_keys,
                 )
 
                 new_table_flag = False
@@ -254,7 +361,7 @@ def process_bronze(
 
                 cdf_cols = ["_change_type", "_commit_version", "_commit_timestamp"]
 
-                df_mergeable = df_mergeable.drop(*cdf_cols)
+                df_mergeable = df_mergeable.drop(*cdf_cols).drop("root_hash")
 
                 df_mergeable.limit(0).write.format("delta").option(
                     "delta.enableChangeDataFeed", "true"
@@ -286,12 +393,15 @@ def process_bronze(
 
             table_description = f"{output_layer}_{output_layer_data_table_name}"
 
+
+            
             export_schemas_s3_and_head(
                 df_mergeable,
                 catalog,
-                table_description,
+                "silver_" + df_mergeable_config.get("TABLE_TARGET", None)+"_"+ function_name + "_data",
                 logger=logger,
                 metadata_dir=settings.metadata_dir,
+                n=1000,
             )
 
             duration = (datetime.datetime.now() - start).total_seconds()
@@ -315,7 +425,7 @@ def process_bronze(
                 csv_file_name=f"{catalog}_{output_layer}_{output_layer_data_table_name}",
                 settings=settings,
                 catalog=catalog,
-                dump_type=output_layer_data_table_name,
+                dump_type=function_name,
                 dump_date=latest_recorded_table_date_input,
                 last_input_version_processed=last_input_version_processed,
             )
@@ -334,10 +444,7 @@ def process_bronze(
                 UC_URL,
                 logger,
             )
-            
-        
-            
-            
+
         except Exception:
             logger.exception(
                 "Failed processing table %s-%s",
@@ -346,11 +453,7 @@ def process_bronze(
             )
             raise
 
-
-    logger.info(
-        "silver_artists processed succesfully"
-    )
-            
+    logger.info(f"silver_{input_table} processed succesfully")
 
 
 def main(spark, settings, logger, s3, input_layer, output_layer):
@@ -365,8 +468,22 @@ def main(spark, settings, logger, s3, input_layer, output_layer):
             UC_URL=settings.uc.url,
             logger=logger,
         )
+        
+        
+    create_discogsCreditlist(spark, settings, logger, catalog, output_layer)
+    
+    bronze_to_silver_subtables(
+        spark,
+        "releases",
+        settings,
+        logger,
+        catalog,
+        s3,
+        input_layer,
+        output_layer,
+    )
 
-    process_bronze(
+    bronze_to_silver_subtables(
         spark,
         "artists",
         settings,
@@ -376,6 +493,7 @@ def main(spark, settings, logger, s3, input_layer, output_layer):
         input_layer,
         output_layer,
     )
+
 
 
 if __name__ == "__main__":
@@ -399,6 +517,8 @@ if __name__ == "__main__":
             bucket=settings.project_name,
             catalog=catalog,
         )
+
+        spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
 
         setup_logger(
             settings.log_dir

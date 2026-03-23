@@ -18,14 +18,15 @@ mc mb --ignore-existing local/discogs/discogs_test/raw/data
 
 mc cp ./data_test_files/discogs_test/raw/data/discogs_20251201_* local/discogs/discogs_test/raw/data/
 
-docker exec spark-master python3 /app/bronze_ingest.py
-docker exec spark-master python3 /app/bronze_ingest.py
+docker exec spark-master python3 /app/raw_to_bronze.py
+docker exec spark-master python3 /app/raw_to_bronze.py
 
 mc cp ./data_test_files/discogs_test/raw/data/discogs_20260101_* local/discogs/discogs_test/raw/data/
 
-docker exec spark-master python3 /app/bronze_ingest.py
-
+docker exec spark-master python3 /app/raw_to_bronze.py
+docker exec spark-master python3 /app/bronze_to_silver_subtables.py
 mc cp ./data_test_files/discogs_test/raw/data/discogs_20260201_* local/discogs/discogs_test/raw/data/
 
-docker exec spark-master python3 /app/bronze_ingest.py
-#docker exec spark-master python3 /app/silver_subtables.py
+docker exec spark-master python3 /app/raw_to_bronze.py
+docker exec spark-master python3 /app/bronze_to_silver_subtables.py
+#docker exec spark-master python3 /app/bronze_to_silver_subtables.py
