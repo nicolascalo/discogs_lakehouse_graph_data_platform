@@ -2,6 +2,16 @@ import os
 import logging
 from pathlib import Path
 import json
+from pyspark.sql.functions import col, to_json
+from pyspark.sql.types import StringType, IntegerType, DoubleType, BooleanType
+from pyspark.sql.functions import to_json, col
+from pyspark.sql.types import StructType, ArrayType, MapType
+
+def serialize_complex_columns(df):
+    for field in df.schema.fields:
+        if isinstance(field.dataType, (StructType, ArrayType, MapType)):
+            df = df.withColumn(field.name, to_json(col(field.name)))
+    return df
 
 def export_schemas(
     df, dump_type: str, metadata_dir: Path, dump_date: str, logger: logging.Logger
@@ -51,9 +61,11 @@ def export_schemas_s3_and_head(
     with open(schema_path, "w") as f:
          json.dump(xml_schema_json, f, indent=4, ensure_ascii=False)
          
-         
+    logger.info(f"{dump_description} -> Exporting first {n} rows of the table")
     head_path = os.path.join(metadata_dir, f"{catalog}_{dump_description}_head{n}.csv")
     
+    df = serialize_complex_columns(df)
+
     if n:
     
         df.limit(n).coalesce(1).write.mode("overwrite").option("escapeQuotes", False).option("header", True).option("extension","tsv").option("sep","\t").csv(head_path)

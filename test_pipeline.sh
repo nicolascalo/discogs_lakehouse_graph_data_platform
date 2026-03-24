@@ -1,6 +1,8 @@
 
 rm -fv ./logs/discogs_test_*
 rm -fv ./metadata/discogs_test_*
+rm -rfv ./metadata/discogs_test_*
+
 mc mb local/discogs
 
 mc rm --recursive --force local/discogs/discogs_test/
